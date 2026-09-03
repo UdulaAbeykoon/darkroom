@@ -1,0 +1,108 @@
+.calibration-panel .inspector-panel__body {
+  padding-top: 9px;
+}
+
+.calibration-panel__process {
+  display: grid;
+  grid-template-columns: 67px minmax(0, 1fr);
+  align-items: center;
+  gap: 7px;
+  padding-bottom: 10px;
+  color: #bcbcbc;
+  font-size: 9px;
+}
+
+.calibration-panel__process select {
+  width: 100%;
+  min-width: 0;
+  height: 22px;
+  padding: 0 22px 0 7px;
+  border: 1px solid #4a4a4a;
+  border-radius: 2px;
+  color: #c8c8c8;
+  background: #292929;
+  font: inherit;
+  color-scheme: dark;
+}
+
+.calibration-panel__process select:hover {
+  border-color: #666;
+  background-color: #303030;
+}
+
+.calibration-panel__process select:focus-visible {
+  outline: 1px solid #9ac7e8;
+  outline-offset: 1px;
+}
+
+.calibration-panel__group {
+  padding: 8px 0 10px;
+  border-top: 1px solid #303030;
+}
+
+.calibration-panel__group:last-child {
+  padding-bottom: 1px;
+}
+
+.calibration-panel__group h3 {
+  margin: 0 0 9px;
+  color: #bebebe;
+  font-size: 9px;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.calibration-panel__reset:disabled {
+  opacity: 0.34;
+  cursor: default;
+}
+
+/* Lightroom identifies the camera-primary channels with restrained color in
+   the track itself; neutral middle stops keep zero easy to locate. */
+.calibration-panel__group--shadows .adjustment-slider__input::-webkit-slider-runnable-track {
+  background: linear-gradient(90deg, #5e9470 0%, #777 50%, #9e648d 100%);
+}
+
+.calibration-panel__group--shadows .adjustment-slider__input::-moz-range-track {
+  background: linear-gradient(90deg, #5e9470 0%, #777 50%, #9e648d 100%);
+}
+
+.calibration-panel__group--red .adjustment-slider:first-child .adjustment-slider__input::-webkit-slider-runnable-track {
+  background: linear-gradient(90deg, #9b7955 0%, #777 50%, #9b596c 100%);
+}
+
+.calibration-panel__group--red .adjustment-slider:first-child .adjustment-slider__input::-moz-range-track {
+  background: linear-gradient(90deg, #9b7955 0%, #777 50%, #9b596c 100%);
+}
+
+.calibration-panel__group--green .adjustment-slider:first-child .adjustment-slider__input::-webkit-slider-runnable-track {
+  background: linear-gradient(90deg, #8b8153 0%, #777 50%, #4f8982 100%);
+}
+
+.calibration-panel__group--green .adjustment-slider:first-child .adjustment-slider__input::-moz-range-track {
+  background: linear-gradient(90deg, #8b8153 0%, #777 50%, #4f8982 100%);
+}
+
+.calibration-panel__group--blue .adjustment-slider:first-child .adjustment-slider__input::-webkit-slider-runnable-track {
+  background: linear-gradient(90deg, #52858f 0%, #777 50%, #745f9b 100%);
+}
+
+.calibration-panel__group--blue .adjustment-slider:first-child .adjustment-slider__input::-moz-range-track {
+  background: linear-gradient(90deg, #52858f 0%, #777 50%, #745f9b 100%);
+}
+
+.calibration-panel__group--shadows .adjustment-slider__input::-moz-range-progress,
+.calibration-panel__group--red .adjustment-slider:first-child .adjustment-slider__input::-moz-range-progress,
+.calibration-panel__group--green .adjustment-slider:first-child .adjustment-slider__input::-moz-range-progress,
+.calibration-panel__group--blue .adjustment-slider:first-child .adjustment-slider__input::-moz-range-progress {
+  background: transparent;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .calibration-panel *,
+  .calibration-panel *::before,
+  .calibration-panel *::after {
+    scroll-behavior: auto;
+    transition-duration: 0.01ms !important;
+  }
+}
