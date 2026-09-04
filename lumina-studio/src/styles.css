@@ -1,0 +1,44 @@
+:root {
+  color: #f4f4f4;
+  background: #090909;
+  font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  min-width: 320px;
+  min-height: 100vh;
+  margin: 0;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+.foundation-shell {
+  display: grid;
+  min-height: 100vh;
+  place-content: center;
+  padding: 2rem;
+  text-align: center;
+}
+
+.foundation-shell__eyebrow {
+  color: #9b9b9b;
+  font-size: 0.75rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.foundation-shell h1 {
+  margin: 0.25rem 0;
+}
+
+.foundation-shell p {
+  margin: 0.5rem 0;
+}
