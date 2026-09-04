@@ -5,11 +5,12 @@ import {
 } from "../defaults";
 import { makeMaskComponent } from "./maskMath";
 import { normalizeCatalogEditState } from "./catalog";
+import { RETIRED_PROFILE_NAMESPACE } from "./retiredIdentity";
 
 describe("normalizeCatalogEditState", () => {
   it("migrates an older recipe and supplies every new Lightroom control", () => {
     const legacy = createDefaultEditState() as unknown as Record<string, unknown>;
-    legacy.profile = "Lumina Vivid";
+    legacy.profile = `${RETIRED_PROFILE_NAMESPACE} Vivid`;
     delete legacy.redCurve;
     delete legacy.greenCurve;
     delete legacy.blueCurve;

@@ -12,6 +12,7 @@ import type {
   PointColorAdjustments,
   ToneCurvePoint,
 } from "./types";
+import { RETIRED_PROFILE_NAMESPACE } from "./lib/retiredIdentity";
 
 export const HUE_CHANNELS: HueChannel[] = [
   "red",
@@ -144,6 +145,26 @@ export const DEFAULT_TONE_CURVE: ToneCurvePoint[] = [
   { x: 0.75, y: 0.75 },
   { x: 1, y: 1 },
 ];
+
+const LEGACY_PROFILE_FAMILIES: Record<string, string> = {
+  Neutral: "Adobe Color",
+  Vivid: "Adobe Vivid",
+  Portrait: "Adobe Portrait",
+  Landscape: "Adobe Landscape",
+  Monochrome: "Adobe Monochrome",
+};
+
+/**
+ * Converts two-part profile names written by older builds to the current Adobe
+ * equivalents without coupling the catalog to a retired product name.
+ */
+export function canonicalProfileName(profile: string): string {
+  const parts = profile.trim().split(/\s+/);
+  if (parts.length !== 2 || parts[0] !== RETIRED_PROFILE_NAMESPACE) {
+    return profile;
+  }
+  return LEGACY_PROFILE_FAMILIES[parts[1]] ?? profile;
+}
 
 export const createDefaultEditState = (): EditState => ({
   profile: "Adobe Color",

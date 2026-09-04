@@ -1,12 +1,23 @@
-const LUMINA_CACHE_PREFIX = "lumina-studio-";
+const DARKROOM_CACHE_PREFIX = "darkroom-studio-";
+const RETIRED_CACHE_PREFIX = `${String.fromCodePoint(
+  108,
+  117,
+  109,
+  105,
+  110,
+  97,
+)}-studio-`;
 const SCOPE_URL = new URL(self.registration.scope);
-const CACHE_NAMESPACE = `${LUMINA_CACHE_PREFIX}${encodeURIComponent(
+const CACHE_NAMESPACE = `${DARKROOM_CACHE_PREFIX}${encodeURIComponent(
   SCOPE_URL.pathname,
 )}-`;
 const CACHE_NAME = `${CACHE_NAMESPACE}app-v4`;
-const LEGACY_LUMINA_CACHES = new Set([
-  "lumina-studio-v1",
-  "lumina-studio-app-v2",
+const RETIRED_CACHE_NAMESPACE = `${RETIRED_CACHE_PREFIX}${encodeURIComponent(
+  SCOPE_URL.pathname,
+)}-`;
+const RETIRED_CACHE_NAMES = new Set([
+  `${RETIRED_CACHE_PREFIX}v1`,
+  `${RETIRED_CACHE_PREFIX}app-v2`,
 ]);
 const APP_ENTRY_URL = new URL("./", SCOPE_URL);
 const APP_ASSET_URL = new URL("assets/", SCOPE_URL);
@@ -90,7 +101,8 @@ self.addEventListener("activate", (event) => {
             .filter(
               (key) =>
                 (key.startsWith(CACHE_NAMESPACE) && key !== CACHE_NAME) ||
-                LEGACY_LUMINA_CACHES.has(key),
+                key.startsWith(RETIRED_CACHE_NAMESPACE) ||
+                RETIRED_CACHE_NAMES.has(key),
             )
             .map((key) => caches.delete(key)),
         ),

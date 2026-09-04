@@ -3,11 +3,27 @@ import {
   BUILT_IN_PRESETS,
   DEFAULT_GLOBAL_ADJUSTMENTS,
   HUE_CHANNELS,
+  canonicalProfileName,
   cloneEditState,
   createDefaultEditState,
 } from "./defaults";
+import { RETIRED_PROFILE_NAMESPACE } from "./lib/retiredIdentity";
 
 describe("default edit state", () => {
+  it("normalizes profile names created by previous builds", () => {
+    expect(canonicalProfileName(`${RETIRED_PROFILE_NAMESPACE} Neutral`)).toBe(
+      "Adobe Color",
+    );
+    expect(canonicalProfileName(`${RETIRED_PROFILE_NAMESPACE} Vivid`)).toBe(
+      "Adobe Vivid",
+    );
+    expect(canonicalProfileName("Adobe Portrait")).toBe("Adobe Portrait");
+    expect(canonicalProfileName("Previous Vivid")).toBe("Previous Vivid");
+    expect(canonicalProfileName("Custom Flat Profile")).toBe(
+      "Custom Flat Profile",
+    );
+  });
+
   it("creates isolated non-destructive state objects", () => {
     const first = createDefaultEditState();
     const second = createDefaultEditState();

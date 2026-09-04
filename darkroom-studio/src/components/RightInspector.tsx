@@ -27,6 +27,7 @@ import {
 } from "lucide-react";
 import {
   BUILT_IN_PRESETS,
+  canonicalProfileName,
   DEFAULT_GLOBAL_ADJUSTMENTS,
   HUE_CHANNELS,
 } from "../defaults";
@@ -400,13 +401,7 @@ function EditInspector(props: InspectorProps) {
           <span>Profile</span>
           <select
             aria-label="Profile"
-            value={({
-              "Lumina Neutral": "Adobe Color",
-              "Lumina Vivid": "Adobe Vivid",
-              "Lumina Portrait": "Adobe Portrait",
-              "Lumina Landscape": "Adobe Landscape",
-              "Lumina Monochrome": "Adobe Monochrome",
-            } as Record<string, string>)[edits.profile] ?? edits.profile}
+            value={canonicalProfileName(edits.profile)}
             onChange={(event) => props.onProfileChange(event.target.value)}
           >
             <option value="Adobe Color">Adobe Color</option>
