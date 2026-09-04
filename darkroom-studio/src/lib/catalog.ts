@@ -239,6 +239,62 @@ function transactionComplete(transaction: IDBTransaction): Promise<void> {
   });
 }
 
+function strictMigrationTransaction(
+  database: IDBDatabase,
+  storeName: string,
+): IDBTransaction {
+  try {
+    return database.transaction(storeName, "readwrite", {
+      durability: "strict",
+    });
+  } catch (error) {
+    if (
+      error instanceof TypeError ||
+      (error instanceof DOMException && error.name === "NotSupportedError")
+    ) {
+      return database.transaction(storeName, "readwrite");
+    }
+    throw error;
+  }
+}
+
+function isStorageCapacityError(error: unknown): boolean {
+  return (
+    error instanceof DOMException &&
+    (error.name === "QuotaExceededError" || error.name === "UnknownError")
+  );
+}
+
+class CatalogMigrationStorageError extends Error {}
+
+function migrationStorageError(photoName: string): Error {
+  return new CatalogMigrationStorageError(
+    `Browser storage is too full to move “${photoName}”. Its existing catalog copy remains safe; free browser storage and reload to continue.`,
+  );
+}
+
+async function ensureMigrationCapacity(photo: StoredPhoto): Promise<void> {
+  const estimate = globalThis.navigator?.storage?.estimate;
+  if (!estimate) return;
+  try {
+    const { quota, usage } = await estimate.call(globalThis.navigator.storage);
+    if (!Number.isFinite(quota) || !Number.isFinite(usage)) return;
+    const payloadBytes =
+      photo.blob.size +
+      (photo.renderBlob?.size ?? 0) +
+      photo.thumbnailBlob.size;
+    const requiredBytes =
+      payloadBytes + Math.max(64 * 1024, Math.ceil(payloadBytes * 0.02));
+    if ((quota ?? 0) - (usage ?? 0) < requiredBytes) {
+      throw migrationStorageError(photo.name);
+    }
+  } catch (error) {
+    if (error instanceof CatalogMigrationStorageError) throw error;
+    // An unavailable estimate is not authoritative; the guarded write below
+    // still leaves the source record untouched if the browser rejects it.
+  }
+}
+
 /**
  * Opens Darkroom's private IndexedDB catalog. This database stores copies of
  * imported files; it never receives or retains a writable filesystem handle.
@@ -591,10 +647,21 @@ async function copyPreviousPhoto(
     );
   }
 
-  const transaction = database.transaction(PHOTO_STORE, "readwrite");
-  const completed = transactionComplete(transaction);
-  transaction.objectStore(PHOTO_STORE).put(candidate);
-  await completed;
+  await ensureMigrationCapacity(photo);
+  try {
+    const transaction = strictMigrationTransaction(database, PHOTO_STORE);
+    const completed = transactionComplete(transaction);
+    transaction.objectStore(PHOTO_STORE).add(candidate);
+    await completed;
+  } catch (error) {
+    if (isStorageCapacityError(error)) throw migrationStorageError(photo.name);
+    if (error instanceof DOMException && error.name === "ConstraintError") {
+      throw new Error(
+        `Migration stopped before overwriting either catalog version of “${photo.name}”.`,
+      );
+    }
+    throw error;
+  }
 
   const copied = await storeRecord<StoredPhoto>(database, PHOTO_STORE, photo.id);
   if (!copied || !sameStoredPhotoShape(copied, candidate)) {
@@ -618,14 +685,26 @@ async function copyPreviousCollection(
     );
   }
 
-  const transaction = database.transaction(COLLECTION_STORE, "readwrite");
-  const completed = transactionComplete(transaction);
-  transaction.objectStore(COLLECTION_STORE).put(collection);
-  await completed;
+  try {
+    const transaction = strictMigrationTransaction(database, COLLECTION_STORE);
+    const completed = transactionComplete(transaction);
+    transaction.objectStore(COLLECTION_STORE).add(collection);
+    await completed;
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "ConstraintError") {
+      throw new Error(
+        `Migration stopped before overwriting either catalog version of “${collection.name}”.`,
+      );
+    }
+    throw error;
+  }
 
-  if (
-    !(await storeRecord<Collection>(database, COLLECTION_STORE, collection.id))
-  ) {
+  const copied = await storeRecord<Collection>(
+    database,
+    COLLECTION_STORE,
+    collection.id,
+  );
+  if (!copied || JSON.stringify(copied) !== JSON.stringify(collection)) {
     throw new Error(`Could not verify the migrated collection “${collection.name}”.`);
   }
 }
@@ -718,7 +797,7 @@ export function requestPersistentStorage(): Promise<boolean> {
 export async function initialize(): Promise<IDBDatabase> {
   const database = await openCatalog();
   if (!catalogMigrationPromise) {
-    catalogMigrationPromise = withCatalogWriteLock(() =>
+    catalogMigrationPromise = enqueueCatalogWrite(() =>
       migratePreviousCatalog(database),
     );
   }
@@ -1587,11 +1666,13 @@ export async function deletePhoto(id: string): Promise<void> {
 
   try {
     await flushCatalogWrites();
-    const database = await openCatalog();
-    const transaction = database.transaction(PHOTO_STORE, "readwrite");
-    const completed = transactionComplete(transaction);
-    transaction.objectStore(PHOTO_STORE).delete(id);
-    await completed;
+    await enqueueCatalogWrite(async () => {
+      const database = await openCatalog();
+      const transaction = database.transaction(PHOTO_STORE, "readwrite");
+      const completed = transactionComplete(transaction);
+      transaction.objectStore(PHOTO_STORE).delete(id);
+      await completed;
+    });
     revokePhotoUrls(id);
   } catch (error) {
     throw catalogError("Could not remove the photo from the local catalog", error);
@@ -1605,7 +1686,7 @@ export async function deletePhoto(id: string): Promise<void> {
 export async function clearCatalog(): Promise<void> {
   try {
     await flushCatalogWrites();
-    await withCatalogWriteLock(async () => {
+    await enqueueCatalogWrite(async () => {
       const database = await openCatalog();
       const transaction = database.transaction(
         [PHOTO_STORE, COLLECTION_STORE],
@@ -1683,11 +1764,13 @@ export async function saveCollection(
   const normalized = validCollection(collection);
 
   try {
-    const database = await openCatalog();
-    const transaction = database.transaction(COLLECTION_STORE, "readwrite");
-    const completed = transactionComplete(transaction);
-    transaction.objectStore(COLLECTION_STORE).put(normalized);
-    await completed;
+    await enqueueCatalogWrite(async () => {
+      const database = await openCatalog();
+      const transaction = database.transaction(COLLECTION_STORE, "readwrite");
+      const completed = transactionComplete(transaction);
+      transaction.objectStore(COLLECTION_STORE).put(normalized);
+      await completed;
+    });
     return normalized;
   } catch (error) {
     throw catalogError("Could not save the collection", error);
@@ -1716,31 +1799,34 @@ export async function deleteCollection(id: string): Promise<void> {
   if (!id.trim()) throw new Error("A collection id is required.");
 
   try {
-    const photos = await getStoredPhotos();
-    const changed = photos
-      .filter((photo) => photo.collectionIds.includes(id))
-      .map((photo) => ({
-        ...photo,
-        collectionIds: photo.collectionIds.filter(
-          (collectionId) => collectionId !== id,
-        ),
-      }));
+    await flushCatalogWrites();
+    await enqueueCatalogWrite(async () => {
+      const photos = await getStoredPhotos();
+      const changed = photos
+        .filter((photo) => photo.collectionIds.includes(id))
+        .map((photo) => ({
+          ...photo,
+          collectionIds: photo.collectionIds.filter(
+            (collectionId) => collectionId !== id,
+          ),
+        }));
 
-    const database = await openCatalog();
-    const stores =
-      changed.length > 0
-        ? [COLLECTION_STORE, PHOTO_STORE]
-        : [COLLECTION_STORE];
-    const transaction = database.transaction(stores, "readwrite");
-    const completed = transactionComplete(transaction);
-    transaction.objectStore(COLLECTION_STORE).delete(id);
+      const database = await openCatalog();
+      const stores =
+        changed.length > 0
+          ? [COLLECTION_STORE, PHOTO_STORE]
+          : [COLLECTION_STORE];
+      const transaction = database.transaction(stores, "readwrite");
+      const completed = transactionComplete(transaction);
+      transaction.objectStore(COLLECTION_STORE).delete(id);
 
-    if (changed.length > 0) {
-      const photoStore = transaction.objectStore(PHOTO_STORE);
-      for (const photo of changed) photoStore.put(photo);
-    }
+      if (changed.length > 0) {
+        const photoStore = transaction.objectStore(PHOTO_STORE);
+        for (const photo of changed) photoStore.put(photo);
+      }
 
-    await completed;
+      await completed;
+    });
   } catch (error) {
     throw catalogError("Could not delete the collection", error);
   }
