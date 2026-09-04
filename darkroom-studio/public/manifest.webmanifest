@@ -1,19 +1,37 @@
 {
-  "name": "Lightroom Classic — Local Workflow Study",
-  "short_name": "LrC Local",
-  "description": "A local-first reproduction of the Lightroom Classic catalog and Develop workflow.",
+  "name": "Darkroom — Local Photo Editor",
+  "short_name": "Darkroom",
+  "description": "A local-first photo catalog and non-destructive editing workspace.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
   "orientation": "any",
-  "background_color": "#050505",
-  "theme_color": "#050505",
+  "background_color": "#030912",
+  "theme_color": "#030912",
   "icons": [
     {
-      "src": "./icon.svg",
-      "sizes": "any",
-      "type": "image/svg+xml",
-      "purpose": "any maskable"
+      "src": "./icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "./icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "./icon-maskable-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "./icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
     }
   ]
 }

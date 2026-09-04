@@ -131,7 +131,7 @@ const DEFAULT_EXPORT: ExportSettings = {
   longEdge: 2400,
   width: 2400,
   height: 1600,
-  fileName: "Lightroom_export",
+  fileName: "Darkroom_export",
   includeMetadata: false,
   watermarkEnabled: false,
   watermarkText: "© Your name",
@@ -1101,7 +1101,7 @@ export default function App() {
       const anchor = document.createElement("a");
       const date = new Date().toISOString().slice(0, 10);
       anchor.href = url;
-      anchor.download = `Lightroom_Classic_catalog_${date}.json`;
+      anchor.download = `Darkroom_catalog_${date}.json`;
       anchor.click();
       window.setTimeout(() => URL.revokeObjectURL(url), 30_000);
       notify("Catalog backup prepared; the browser download was requested.", "success");
@@ -1788,7 +1788,7 @@ export default function App() {
           const fileName =
             exportTargets.length === 1
               ? exportSettings.fileName || `${withoutExtension(photo.name)}_edit`
-              : `${exportSettings.fileName || "Lightroom_export"}_${String(index + 1).padStart(3, "0")}_${withoutExtension(photo.name)}`;
+              : `${exportSettings.fileName || "Darkroom_export"}_${String(index + 1).padStart(3, "0")}_${withoutExtension(photo.name)}`;
           anchor.href = url;
           anchor.download = `${fileName}.${extension}`;
           anchor.click();
@@ -2042,10 +2042,18 @@ export default function App() {
         }}
       />
       <header className="topbar classic-module-bar">
-        <div className="classic-identity" aria-label="Lightroom Classic catalog">
-          <span className="classic-identity__mark" aria-hidden="true">LrC</span>
+        <div className="classic-identity" aria-label="Darkroom catalog">
+          <img
+            className="classic-identity__mark"
+            src={`${import.meta.env.BASE_URL}icon.svg`}
+            alt=""
+            aria-hidden="true"
+            width={27}
+            height={27}
+            draggable={false}
+          />
           <span className="classic-identity__text">
-            <strong>Adobe Lightroom Classic</strong>
+            <strong>Darkroom</strong>
             <small>Local catalog</small>
           </span>
         </div>

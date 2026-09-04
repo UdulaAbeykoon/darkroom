@@ -1,9 +1,9 @@
-# Lightroom Classic local workflow study
+# Darkroom
 
-This project is a free, local-first photo catalog and non-destructive editor that
-reproduces the Lightroom Classic 2026 workspace and workflow demonstrated in the
-project's reference walkthrough. It is an independent educational implementation,
-not an Adobe product and not affiliated with or endorsed by Adobe.
+Darkroom is a free, local-first photo catalog and non-destructive editor inspired
+by the Lightroom Classic 2026 workspace and the project's reference walkthrough.
+It is an independent educational implementation, not an Adobe product and not
+affiliated with or endorsed by Adobe.
 
 All project files live inside this folder. The app has no filesystem write
 handle to imported source photos: it never moves, overwrites, or deletes them.

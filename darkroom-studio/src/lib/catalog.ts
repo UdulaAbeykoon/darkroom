@@ -371,7 +371,7 @@ export function openCatalog(): Promise<IDBDatabase> {
       settled = true;
       reject(
         new Error(
-          "Could not upgrade the local photo catalog because it is open in another tab. Close other Lightroom workspace tabs and try again.",
+          "Could not upgrade the local photo catalog because it is open in another tab. Close other Darkroom tabs and try again.",
         ),
       );
     };
@@ -473,7 +473,7 @@ function openPreviousCatalogForCutover(): Promise<IDBDatabase | null> {
       settled = true;
       reject(
         new Error(
-          "Could not prepare the previous local catalog because it is open in another tab. Close other Lightroom workspace tabs and reload.",
+          "Could not prepare the previous local catalog because it is open in another tab. Close other Darkroom tabs and reload.",
         ),
       );
     };
@@ -2229,11 +2229,11 @@ export async function importCatalog(
   const parsed = await catalogInputText(input);
   if (!isObject(parsed)) throw new Error("The catalog must contain a JSON object.");
   if (!isCompatibleCatalogFormat(parsed.format)) {
-    throw new Error("This file is not a compatible Lightroom local catalog export.");
+    throw new Error("This file is not a compatible Darkroom catalog export.");
   }
   if (parsed.version !== CATALOG_EXPORT_VERSION) {
     throw new Error(
-      `Catalog version ${String(parsed.version)} is not supported by this Lightroom local workflow.`,
+      `Catalog version ${String(parsed.version)} is not supported by this Darkroom version.`,
     );
   }
   if (!Array.isArray(parsed.photos) || !Array.isArray(parsed.collections)) {

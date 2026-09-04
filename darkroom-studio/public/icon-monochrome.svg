@@ -1,0 +1,4 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Darkroom">
+  <path fill="#000000" fill-rule="evenodd" d="M108 144h122c86 0 139 42 139 112s-53 112-139 112H108V144Zm51 46v132h66c58 0 91-23 91-66s-33-66-91-66h-66Z"/>
+  <path fill="#000000" d="M350 224h49v28c18-22 42-33 73-33h11v50h-19c-41 0-63 21-63 62v37h-51V224Z"/>
+</svg>
