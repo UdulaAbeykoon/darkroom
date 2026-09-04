@@ -35,12 +35,10 @@ describe("service-worker cache ownership", () => {
     });
     await completion;
 
-    expect(open).toHaveBeenCalledWith("darkroom-studio-%2Fapp%2F-app-v5");
+    expect(open).toHaveBeenCalledWith("darkroom-studio-%2Fapp%2F-app-v6");
     expect(addAll).toHaveBeenCalledWith([
       "https://example.test/app/",
       "https://example.test/app/manifest.webmanifest",
-      "https://example.test/app/icon.svg",
-      "https://example.test/app/icon-monochrome.svg",
       "https://example.test/app/icon-192.png",
       "https://example.test/app/icon-512.png",
       "https://example.test/app/icon-maskable-192.png",
@@ -65,8 +63,8 @@ describe("service-worker cache ownership", () => {
     };
     const retiredPrefix = `${atob("bHVtaW5hLXN0dWRpby0=")}`;
     const encodedScope = encodeURIComponent("/app/");
-    const current = `darkroom-studio-${encodedScope}-app-v5`;
-    const staleCurrent = `darkroom-studio-${encodedScope}-app-v4`;
+    const current = `darkroom-studio-${encodedScope}-app-v6`;
+    const staleCurrent = `darkroom-studio-${encodedScope}-app-v5`;
     const retiredScoped = `${retiredPrefix}${encodedScope}-app-v4`;
     const retiredGlobal = `${retiredPrefix}app-v2`;
     const unrelated = "shared-app-v1";

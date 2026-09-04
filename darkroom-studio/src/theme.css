@@ -89,13 +89,11 @@ body,
   height: 27px;
   flex: 0 0 27px;
   border: 0;
-  border-radius: 5px;
-  color: var(--brand-ink);
-  background: var(--brand-frost);
-  object-fit: cover;
-  box-shadow:
-    0 0 0 1px rgb(255 255 255 / 0.24),
-    0 3px 12px rgb(0 0 0 / 0.34);
+  border-radius: 0;
+  color: transparent;
+  background: transparent;
+  object-fit: contain;
+  box-shadow: none;
 }
 
 .classic-identity__text strong {

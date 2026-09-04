@@ -2045,7 +2045,7 @@ export default function App() {
         <div className="classic-identity" aria-label="Darkroom catalog">
           <img
             className="classic-identity__mark"
-            src={`${import.meta.env.BASE_URL}icon.svg`}
+            src={`${import.meta.env.BASE_URL}icon-192.png`}
             alt=""
             aria-hidden="true"
             width={27}
