@@ -89,7 +89,7 @@ export const SYNC_SETTINGS_DETAIL_GROUPS: Partial<
 > = RAW_SYNC_SETTINGS_DETAIL_GROUPS;
 
 /**
- * `details` is optional so settings selections created by earlier Lumina builds
+ * `details` is optional so settings selections created by earlier builds
  * remain valid. When a detail is absent, its parent category controls it.
  */
 export type SyncSettingsSelection = Record<SyncSettingsCategory, boolean> & {

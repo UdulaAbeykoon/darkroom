@@ -1,5 +1,5 @@
 {
-  "name": "lumina-studio",
+  "name": "darkroom-studio",
   "private": true,
   "version": "0.1.0",
   "type": "module",
@@ -25,6 +25,7 @@
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.4",
+    "fake-indexeddb": "^6.2.5",
     "typescript": "^7.0.2",
     "vite": "^8.1.5",
     "vitest": "^4.1.10"

@@ -1,6 +1,7 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import App from "./App";
+import { RETIRED_STUDIO_NAMESPACE } from "./lib/retiredIdentity";
 import "./styles.css";
 
 createRoot(document.getElementById("root")!).render(
@@ -34,9 +35,20 @@ async function cleanLegacyLocalWorker(): Promise<void> {
   );
   if ("caches" in window) {
     const keys = await caches.keys();
+    const encodedScope = encodeURIComponent(appBaseUrl.pathname);
+    const currentNamespace = `darkroom-studio-${encodedScope}-`;
+    const retiredNamespace = `${RETIRED_STUDIO_NAMESPACE}-${encodedScope}-`;
+    const retiredGlobalNames = new Set([
+      `${RETIRED_STUDIO_NAMESPACE}-v1`,
+      `${RETIRED_STUDIO_NAMESPACE}-app-v2`,
+    ]);
     await Promise.all(
       keys
-        .filter((key) => key.startsWith("lumina-studio-"))
+        .filter((key) =>
+          key.startsWith(currentNamespace) ||
+          key.startsWith(retiredNamespace) ||
+          retiredGlobalNames.has(key),
+        )
         .map((key) => caches.delete(key)),
     );
   }
@@ -52,13 +64,13 @@ if (
     void navigator.serviceWorker
       .register(serviceWorkerUrl.href, { scope: appBaseUrl.pathname })
       .catch((error: unknown) => {
-        console.warn("Lumina service worker registration failed.", error);
+        console.warn("Darkroom service worker registration failed.", error);
       });
   });
 } else if (isLocalServiceWorkerHost && "serviceWorker" in navigator) {
   window.addEventListener("load", () => {
     void cleanLegacyLocalWorker().catch((error: unknown) => {
-      console.warn("Lumina legacy service-worker cleanup failed.", error);
+      console.warn("Darkroom legacy service-worker cleanup failed.", error);
     });
   });
 }

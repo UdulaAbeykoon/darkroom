@@ -18,6 +18,7 @@ import {
   normalizePeopleFeatures,
 } from "./maskMath";
 import { expandHealPaths, type HealDab } from "./healPath";
+import { canonicalProfileName } from "../defaults";
 
 const MAX_MASKS = 8;
 const MAX_HEAL_SPOTS = 32;
@@ -1052,10 +1053,11 @@ const processGlobalCpu = (
 };
 
 const profileIndex = (profile: string): number => {
-  if (profile === "Adobe Vivid" || profile === "Lumina Vivid") return 1;
-  if (profile === "Adobe Portrait" || profile === "Lumina Portrait") return 2;
-  if (profile === "Adobe Landscape" || profile === "Lumina Landscape") return 3;
-  if (profile === "Adobe Monochrome" || profile === "Lumina Monochrome") return 4;
+  const canonical = canonicalProfileName(profile);
+  if (canonical === "Adobe Vivid") return 1;
+  if (canonical === "Adobe Portrait") return 2;
+  if (canonical === "Adobe Landscape") return 3;
+  if (canonical === "Adobe Monochrome") return 4;
   return 0;
 };
 

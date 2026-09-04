@@ -1,10 +1,11 @@
-import { createDefaultEditState } from "../defaults";
+import { canonicalProfileName, createDefaultEditState } from "../defaults";
 import { normalizeMasks } from "./maskMath";
 import {
   cameraRawInfo,
   decodeCameraRaw,
   renderBlobForPhoto,
 } from "./rawImage";
+import { RETIRED_CATALOG_NAME } from "./retiredIdentity";
 import type {
   Collection,
   ColorLabel,
@@ -15,13 +16,14 @@ import type {
   PhotoRecord,
 } from "../types";
 
-const DATABASE_NAME = "lumina-studio-catalog";
-const DATABASE_VERSION = 2;
+const DATABASE_NAME = "darkroom-catalog";
+const DATABASE_VERSION = 3;
+const RETIRED_DATABASE_VERSION = 3;
 const PHOTO_STORE = "photos";
 const COLLECTION_STORE = "collections";
 const CONTENT_FINGERPRINT_INDEX = "contentFingerprint";
 const THUMBNAIL_LONG_EDGE = 512;
-const CATALOG_FORMAT = "lumina-studio-catalog";
+const CATALOG_FORMAT = "darkroom-catalog";
 const CATALOG_EXPORT_VERSION = 1;
 const MAX_CATALOG_BACKUP_BYTES = 32 * 1024 * 1024;
 
@@ -154,6 +156,7 @@ const COLOR_LABELS = new Set<ColorLabel>([
 ]);
 
 let databasePromise: Promise<IDBDatabase> | undefined;
+let catalogMigrationPromise: Promise<void> | undefined;
 let persistenceRequest: Promise<boolean> | undefined;
 let catalogWriteQueue: Promise<void> = Promise.resolve();
 let pendingSaveTimer: ReturnType<typeof setTimeout> | undefined;
@@ -186,7 +189,16 @@ async function withCatalogWriteLock<T>(operation: () => Promise<T>): Promise<T> 
       | undefined
   )?.locks;
   if (!lockManager?.request) return operation();
-  return lockManager.request("lumina-studio-catalog-write", operation);
+
+  const lockNames = [
+    `${DATABASE_NAME}-write`,
+    `${RETIRED_CATALOG_NAME}-write`,
+  ].sort();
+  const requestLock = (index: number): Promise<T> =>
+    index >= lockNames.length
+      ? operation()
+      : lockManager.request(lockNames[index], () => requestLock(index + 1));
+  return requestLock(0);
 }
 
 function enqueueCatalogWrite<T>(operation: () => Promise<T>): Promise<T> {
@@ -227,8 +239,64 @@ function transactionComplete(transaction: IDBTransaction): Promise<void> {
   });
 }
 
+function strictMigrationTransaction(
+  database: IDBDatabase,
+  storeName: string,
+): IDBTransaction {
+  try {
+    return database.transaction(storeName, "readwrite", {
+      durability: "strict",
+    });
+  } catch (error) {
+    if (
+      error instanceof TypeError ||
+      (error instanceof DOMException && error.name === "NotSupportedError")
+    ) {
+      return database.transaction(storeName, "readwrite");
+    }
+    throw error;
+  }
+}
+
+function isStorageCapacityError(error: unknown): boolean {
+  return (
+    error instanceof DOMException &&
+    (error.name === "QuotaExceededError" || error.name === "UnknownError")
+  );
+}
+
+class CatalogMigrationStorageError extends Error {}
+
+function migrationStorageError(photoName: string): Error {
+  return new CatalogMigrationStorageError(
+    `Browser storage is too full to move “${photoName}”. Its existing catalog copy remains safe; free browser storage and reload to continue.`,
+  );
+}
+
+async function ensureMigrationCapacity(photo: StoredPhoto): Promise<void> {
+  const estimate = globalThis.navigator?.storage?.estimate;
+  if (!estimate) return;
+  try {
+    const { quota, usage } = await estimate.call(globalThis.navigator.storage);
+    if (!Number.isFinite(quota) || !Number.isFinite(usage)) return;
+    const payloadBytes =
+      photo.blob.size +
+      (photo.renderBlob?.size ?? 0) +
+      photo.thumbnailBlob.size;
+    const requiredBytes =
+      payloadBytes + Math.max(64 * 1024, Math.ceil(payloadBytes * 0.02));
+    if ((quota ?? 0) - (usage ?? 0) < requiredBytes) {
+      throw migrationStorageError(photo.name);
+    }
+  } catch (error) {
+    if (error instanceof CatalogMigrationStorageError) throw error;
+    // An unavailable estimate is not authoritative; the guarded write below
+    // still leaves the source record untouched if the browser rejects it.
+  }
+}
+
 /**
- * Opens Lumina's private IndexedDB catalog. This database stores copies of
+ * Opens Darkroom's private IndexedDB catalog. This database stores copies of
  * imported files; it never receives or retains a writable filesystem handle.
  */
 export function openCatalog(): Promise<IDBDatabase> {
@@ -316,6 +384,395 @@ export function openCatalog(): Promise<IDBDatabase> {
   return databasePromise;
 }
 
+function hasPreviousCatalogSchema(
+  database: IDBDatabase,
+  transaction?: IDBTransaction,
+): boolean {
+  if (
+    database.objectStoreNames.length !== 2 ||
+    !database.objectStoreNames.contains(PHOTO_STORE) ||
+    !database.objectStoreNames.contains(COLLECTION_STORE)
+  ) {
+    return false;
+  }
+
+  const inspection =
+    transaction ??
+    database.transaction([PHOTO_STORE, COLLECTION_STORE], "readonly");
+  const photoStore = inspection.objectStore(PHOTO_STORE);
+  const collectionStore = inspection.objectStore(COLLECTION_STORE);
+  return (
+    photoStore.keyPath === "id" &&
+    collectionStore.keyPath === "id" &&
+    photoStore.indexNames.contains("fingerprint")
+  );
+}
+
+/**
+ * Raises the retired catalog to a sentinel version before moving any records.
+ * Older builds open an exact lower version, so they can no longer write while
+ * this resumable one-way cutover is in progress.
+ */
+function openPreviousCatalogForCutover(): Promise<IDBDatabase | null> {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(
+      RETIRED_CATALOG_NAME,
+      RETIRED_DATABASE_VERSION,
+    );
+    let created = false;
+    let invalidSchema = false;
+    let settled = false;
+
+    request.onupgradeneeded = (event) => {
+      if (event.oldVersion === 0) {
+        created = true;
+        request.transaction?.abort();
+        return;
+      }
+      if (
+        !request.transaction ||
+        !hasPreviousCatalogSchema(request.result, request.transaction)
+      ) {
+        invalidSchema = true;
+        request.transaction?.abort();
+      }
+    };
+    request.onsuccess = () => {
+      if (settled) {
+        request.result.close();
+        return;
+      }
+      settled = true;
+      if (!hasPreviousCatalogSchema(request.result)) {
+        request.result.close();
+        reject(new Error("The previous local catalog has an unexpected schema."));
+        return;
+      }
+      resolve(request.result);
+    };
+    request.onerror = () => {
+      if (settled) return;
+      settled = true;
+      if (created && request.error?.name === "AbortError") {
+        resolve(null);
+        return;
+      }
+      if (invalidSchema) {
+        reject(new Error("The previous local catalog has an unexpected schema."));
+        return;
+      }
+      reject(
+        catalogError(
+          "Could not prepare the previous local photo catalog",
+          request.error ?? new Error("IndexedDB open request failed"),
+        ),
+      );
+    };
+    request.onblocked = () => {
+      if (settled) return;
+      settled = true;
+      reject(
+        new Error(
+          "Could not prepare the previous local catalog because it is open in another tab. Close other Lightroom workspace tabs and reload.",
+        ),
+      );
+    };
+  });
+}
+
+async function storeKeys(
+  database: IDBDatabase,
+  storeName: string,
+): Promise<IDBValidKey[]> {
+  const transaction = database.transaction(storeName, "readonly");
+  const completed = transactionComplete(transaction);
+  const keys = await requestResult(transaction.objectStore(storeName).getAllKeys());
+  await completed;
+  return keys;
+}
+
+async function storeRecord<T>(
+  database: IDBDatabase,
+  storeName: string,
+  key: IDBValidKey,
+): Promise<T | undefined> {
+  const transaction = database.transaction(storeName, "readonly");
+  const completed = transactionComplete(transaction);
+  const record = await requestResult<T | undefined>(
+    transaction.objectStore(storeName).get(key),
+  );
+  await completed;
+  return record;
+}
+
+function isStoredPhotoForMigration(value: unknown): value is StoredPhoto {
+  if (!isObject(value)) return false;
+  return (
+    typeof value.id === "string" &&
+    typeof value.name === "string" &&
+    typeof value.type === "string" &&
+    typeof value.size === "number" &&
+    typeof value.width === "number" &&
+    typeof value.height === "number" &&
+    typeof value.importedAt === "string" &&
+    typeof value.lastModified === "number" &&
+    typeof value.fingerprint === "string" &&
+    value.blob instanceof Blob &&
+    value.thumbnailBlob instanceof Blob &&
+    (value.renderBlob === undefined || value.renderBlob instanceof Blob) &&
+    isObject(value.metadata) &&
+    typeof value.rating === "number" &&
+    FLAG_STATES.has(value.flag as FlagState) &&
+    COLOR_LABELS.has(value.colorLabel as ColorLabel) &&
+    Array.isArray(value.keywords) &&
+    Array.isArray(value.collectionIds) &&
+    isObject(value.edits) &&
+    Array.isArray(value.snapshots)
+  );
+}
+
+function isCollectionForMigration(value: unknown): value is Collection {
+  return (
+    isObject(value) &&
+    typeof value.id === "string" &&
+    typeof value.name === "string" &&
+    typeof value.createdAt === "string"
+  );
+}
+
+interface StoredPhotoMatches {
+  byId?: StoredPhoto;
+  byFingerprint?: StoredPhoto;
+}
+
+async function storedPhotoMatches(
+  database: IDBDatabase,
+  photo: StoredPhoto,
+): Promise<StoredPhotoMatches> {
+  const transaction = database.transaction(PHOTO_STORE, "readonly");
+  const completed = transactionComplete(transaction);
+  const store = transaction.objectStore(PHOTO_STORE);
+  const [byId, byFingerprint] = await Promise.all([
+    requestResult<StoredPhoto | undefined>(store.get(photo.id)),
+    requestResult<StoredPhoto | undefined>(
+      store.index("fingerprint").get(photo.fingerprint),
+    ),
+  ]);
+  await completed;
+  return { byId, byFingerprint };
+}
+
+function sameBlobShape(left: Blob | undefined, right: Blob | undefined): boolean {
+  if (left === undefined || right === undefined) return left === right;
+  return left.size === right.size && left.type === right.type;
+}
+
+async function sameBlobContent(
+  left: Blob | undefined,
+  right: Blob | undefined,
+): Promise<boolean> {
+  if (!sameBlobShape(left, right)) return false;
+  if (!left || !right) return true;
+  const chunkSize = 1024 * 1024;
+  for (let offset = 0; offset < left.size; offset += chunkSize) {
+    const end = Math.min(left.size, offset + chunkSize);
+    const [leftChunk, rightChunk] = await Promise.all([
+      left.slice(offset, end).arrayBuffer(),
+      right.slice(offset, end).arrayBuffer(),
+    ]);
+    const leftBytes = new Uint8Array(leftChunk);
+    const rightBytes = new Uint8Array(rightChunk);
+    for (let index = 0; index < leftBytes.length; index += 1) {
+      if (leftBytes[index] !== rightBytes[index]) return false;
+    }
+  }
+  return true;
+}
+
+function storedPhotoMetadataJson(photo: StoredPhoto): string {
+  const {
+    blob: _blob,
+    renderBlob: _renderBlob,
+    thumbnailBlob: _thumbnailBlob,
+    ...metadata
+  } = photo;
+  return JSON.stringify(metadata);
+}
+
+async function sameStoredPhoto(
+  left: StoredPhoto,
+  right: StoredPhoto,
+): Promise<boolean> {
+  return (
+    sameStoredPhotoShape(left, right) &&
+    (await sameBlobContent(left.blob, right.blob)) &&
+    (await sameBlobContent(left.renderBlob, right.renderBlob)) &&
+    (await sameBlobContent(left.thumbnailBlob, right.thumbnailBlob))
+  );
+}
+
+function sameStoredPhotoShape(left: StoredPhoto, right: StoredPhoto): boolean {
+  return (
+    storedPhotoMetadataJson(left) === storedPhotoMetadataJson(right) &&
+    sameBlobShape(left.blob, right.blob) &&
+    sameBlobShape(left.renderBlob, right.renderBlob) &&
+    sameBlobShape(left.thumbnailBlob, right.thumbnailBlob)
+  );
+}
+
+function migratedDuplicateFingerprint(photo: StoredPhoto): string {
+  return `${photo.fingerprint}:catalog-migration:${photo.id}`;
+}
+
+async function copyPreviousPhoto(
+  database: IDBDatabase,
+  photo: StoredPhoto,
+): Promise<void> {
+  const matches = await storedPhotoMatches(database, photo);
+  const collidesWithAnotherPhoto =
+    matches.byFingerprint !== undefined &&
+    matches.byFingerprint.id !== photo.id;
+  const migratedFingerprint = migratedDuplicateFingerprint(photo);
+  const needsMigratedFingerprint =
+    collidesWithAnotherPhoto ||
+    matches.byId?.fingerprint === migratedFingerprint;
+  const candidate = needsMigratedFingerprint
+    ? { ...photo, fingerprint: migratedFingerprint }
+    : photo;
+
+  if (matches.byId) {
+    if (await sameStoredPhoto(matches.byId, candidate)) return;
+    throw new Error(
+      `Migration stopped before overwriting either catalog version of “${photo.name}”.`,
+    );
+  }
+
+  await ensureMigrationCapacity(photo);
+  try {
+    const transaction = strictMigrationTransaction(database, PHOTO_STORE);
+    const completed = transactionComplete(transaction);
+    transaction.objectStore(PHOTO_STORE).add(candidate);
+    await completed;
+  } catch (error) {
+    if (isStorageCapacityError(error)) throw migrationStorageError(photo.name);
+    if (error instanceof DOMException && error.name === "ConstraintError") {
+      throw new Error(
+        `Migration stopped before overwriting either catalog version of “${photo.name}”.`,
+      );
+    }
+    throw error;
+  }
+
+  const copied = await storeRecord<StoredPhoto>(database, PHOTO_STORE, photo.id);
+  if (!copied || !sameStoredPhotoShape(copied, candidate)) {
+    throw new Error(`Could not verify the migrated copy of “${photo.name}”.`);
+  }
+}
+
+async function copyPreviousCollection(
+  database: IDBDatabase,
+  collection: Collection,
+): Promise<void> {
+  const existing = await storeRecord<Collection>(
+    database,
+    COLLECTION_STORE,
+    collection.id,
+  );
+  if (existing) {
+    if (JSON.stringify(existing) === JSON.stringify(collection)) return;
+    throw new Error(
+      `Migration stopped before overwriting either catalog version of “${collection.name}”.`,
+    );
+  }
+
+  try {
+    const transaction = strictMigrationTransaction(database, COLLECTION_STORE);
+    const completed = transactionComplete(transaction);
+    transaction.objectStore(COLLECTION_STORE).add(collection);
+    await completed;
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "ConstraintError") {
+      throw new Error(
+        `Migration stopped before overwriting either catalog version of “${collection.name}”.`,
+      );
+    }
+    throw error;
+  }
+
+  const copied = await storeRecord<Collection>(
+    database,
+    COLLECTION_STORE,
+    collection.id,
+  );
+  if (!copied || JSON.stringify(copied) !== JSON.stringify(collection)) {
+    throw new Error(`Could not verify the migrated collection “${collection.name}”.`);
+  }
+}
+
+async function deleteStoreRecord(
+  database: IDBDatabase,
+  storeName: string,
+  key: IDBValidKey,
+): Promise<void> {
+  const transaction = database.transaction(storeName, "readwrite");
+  const completed = transactionComplete(transaction);
+  transaction.objectStore(storeName).delete(key);
+  await completed;
+  if ((await storeRecord(database, storeName, key)) !== undefined) {
+    throw new Error("Could not retire a migrated catalog record.");
+  }
+}
+
+async function migratePreviousCatalog(database: IDBDatabase): Promise<void> {
+  const previous = await openPreviousCatalogForCutover();
+  if (!previous) return;
+
+  try {
+    for (const key of await storeKeys(previous, PHOTO_STORE)) {
+      const photo = await storeRecord<unknown>(previous, PHOTO_STORE, key);
+      if (!isStoredPhotoForMigration(photo)) {
+        throw new Error("The previous local catalog contains a damaged photo record.");
+      }
+      await copyPreviousPhoto(database, photo);
+      await deleteStoreRecord(previous, PHOTO_STORE, key);
+    }
+
+    for (const key of await storeKeys(previous, COLLECTION_STORE)) {
+      const collection = await storeRecord<unknown>(
+        previous,
+        COLLECTION_STORE,
+        key,
+      );
+      if (!isCollectionForMigration(collection)) {
+        throw new Error(
+          "The previous local catalog contains a damaged collection record.",
+        );
+      }
+      await copyPreviousCollection(database, collection);
+      await deleteStoreRecord(previous, COLLECTION_STORE, key);
+    }
+  } finally {
+    previous.close();
+  }
+}
+
+async function clearPreviousCatalogRecords(): Promise<void> {
+  const previous = await openPreviousCatalogForCutover();
+  if (!previous) return;
+  try {
+    const transaction = previous.transaction(
+      [PHOTO_STORE, COLLECTION_STORE],
+      "readwrite",
+    );
+    const completed = transactionComplete(transaction);
+    transaction.objectStore(PHOTO_STORE).clear();
+    transaction.objectStore(COLLECTION_STORE).clear();
+    await completed;
+  } finally {
+    previous.close();
+  }
+}
+
 /**
  * Asks the browser not to evict the catalog under storage pressure. Browsers
  * may decline this request; a declined request does not prevent local editing.
@@ -339,6 +796,12 @@ export function requestPersistentStorage(): Promise<boolean> {
 
 export async function initialize(): Promise<IDBDatabase> {
   const database = await openCatalog();
+  if (!catalogMigrationPromise) {
+    catalogMigrationPromise = enqueueCatalogWrite(() =>
+      migratePreviousCatalog(database),
+    );
+  }
+  await catalogMigrationPromise;
   await requestPersistentStorage();
   return database;
 }
@@ -1195,7 +1658,7 @@ export async function flushCatalogWrites(): Promise<void> {
 }
 
 /**
- * Deletes only Lumina's IndexedDB copy. The source file selected during import
+ * Deletes only Darkroom's IndexedDB copy. The source file selected during import
  * is never moved, renamed, overwritten, or deleted.
  */
 export async function deletePhoto(id: string): Promise<void> {
@@ -1203,11 +1666,13 @@ export async function deletePhoto(id: string): Promise<void> {
 
   try {
     await flushCatalogWrites();
-    const database = await openCatalog();
-    const transaction = database.transaction(PHOTO_STORE, "readwrite");
-    const completed = transactionComplete(transaction);
-    transaction.objectStore(PHOTO_STORE).delete(id);
-    await completed;
+    await enqueueCatalogWrite(async () => {
+      const database = await openCatalog();
+      const transaction = database.transaction(PHOTO_STORE, "readwrite");
+      const completed = transactionComplete(transaction);
+      transaction.objectStore(PHOTO_STORE).delete(id);
+      await completed;
+    });
     revokePhotoUrls(id);
   } catch (error) {
     throw catalogError("Could not remove the photo from the local catalog", error);
@@ -1215,21 +1680,24 @@ export async function deletePhoto(id: string): Promise<void> {
 }
 
 /**
- * Explicitly clears Lumina-owned IndexedDB records. It never touches source
+ * Explicitly clears Darkroom-owned IndexedDB records. It never touches source
  * files. Nothing calls this automatically.
  */
 export async function clearCatalog(): Promise<void> {
   try {
     await flushCatalogWrites();
-    const database = await openCatalog();
-    const transaction = database.transaction(
-      [PHOTO_STORE, COLLECTION_STORE],
-      "readwrite",
-    );
-    const completed = transactionComplete(transaction);
-    transaction.objectStore(PHOTO_STORE).clear();
-    transaction.objectStore(COLLECTION_STORE).clear();
-    await completed;
+    await enqueueCatalogWrite(async () => {
+      const database = await openCatalog();
+      const transaction = database.transaction(
+        [PHOTO_STORE, COLLECTION_STORE],
+        "readwrite",
+      );
+      const completed = transactionComplete(transaction);
+      transaction.objectStore(PHOTO_STORE).clear();
+      transaction.objectStore(COLLECTION_STORE).clear();
+      await completed;
+      await clearPreviousCatalogRecords();
+    });
 
     for (const id of [...activeObjectUrls.keys()]) revokePhotoUrls(id);
   } catch (error) {
@@ -1296,11 +1764,13 @@ export async function saveCollection(
   const normalized = validCollection(collection);
 
   try {
-    const database = await openCatalog();
-    const transaction = database.transaction(COLLECTION_STORE, "readwrite");
-    const completed = transactionComplete(transaction);
-    transaction.objectStore(COLLECTION_STORE).put(normalized);
-    await completed;
+    await enqueueCatalogWrite(async () => {
+      const database = await openCatalog();
+      const transaction = database.transaction(COLLECTION_STORE, "readwrite");
+      const completed = transactionComplete(transaction);
+      transaction.objectStore(COLLECTION_STORE).put(normalized);
+      await completed;
+    });
     return normalized;
   } catch (error) {
     throw catalogError("Could not save the collection", error);
@@ -1329,31 +1799,34 @@ export async function deleteCollection(id: string): Promise<void> {
   if (!id.trim()) throw new Error("A collection id is required.");
 
   try {
-    const photos = await getStoredPhotos();
-    const changed = photos
-      .filter((photo) => photo.collectionIds.includes(id))
-      .map((photo) => ({
-        ...photo,
-        collectionIds: photo.collectionIds.filter(
-          (collectionId) => collectionId !== id,
-        ),
-      }));
+    await flushCatalogWrites();
+    await enqueueCatalogWrite(async () => {
+      const photos = await getStoredPhotos();
+      const changed = photos
+        .filter((photo) => photo.collectionIds.includes(id))
+        .map((photo) => ({
+          ...photo,
+          collectionIds: photo.collectionIds.filter(
+            (collectionId) => collectionId !== id,
+          ),
+        }));
 
-    const database = await openCatalog();
-    const stores =
-      changed.length > 0
-        ? [COLLECTION_STORE, PHOTO_STORE]
-        : [COLLECTION_STORE];
-    const transaction = database.transaction(stores, "readwrite");
-    const completed = transactionComplete(transaction);
-    transaction.objectStore(COLLECTION_STORE).delete(id);
+      const database = await openCatalog();
+      const stores =
+        changed.length > 0
+          ? [COLLECTION_STORE, PHOTO_STORE]
+          : [COLLECTION_STORE];
+      const transaction = database.transaction(stores, "readwrite");
+      const completed = transactionComplete(transaction);
+      transaction.objectStore(COLLECTION_STORE).delete(id);
 
-    if (changed.length > 0) {
-      const photoStore = transaction.objectStore(PHOTO_STORE);
-      for (const photo of changed) photoStore.put(photo);
-    }
+      if (changed.length > 0) {
+        const photoStore = transaction.objectStore(PHOTO_STORE);
+        for (const photo of changed) photoStore.put(photo);
+      }
 
-    await completed;
+      await completed;
+    });
   } catch (error) {
     throw catalogError("Could not delete the collection", error);
   }
@@ -1564,14 +2037,7 @@ function importedEditState(value: unknown, fallback: EditState): EditState {
   };
 
   const next = mergeKnownShape(fallback, value) as EditState;
-  const legacyProfiles: Record<string, string> = {
-    "Lumina Neutral": "Adobe Color",
-    "Lumina Vivid": "Adobe Vivid",
-    "Lumina Portrait": "Adobe Portrait",
-    "Lumina Landscape": "Adobe Landscape",
-    "Lumina Monochrome": "Adobe Monochrome",
-  };
-  next.profile = (legacyProfiles[value.profile] ?? value.profile).slice(0, 200);
+  next.profile = canonicalProfileName(value.profile).slice(0, 200);
   const restoreCurve = (candidate: unknown, fallbackCurve: EditState["curve"]) => {
     if (!Array.isArray(candidate)) return structuredClone(fallbackCurve);
     const restored = candidate
@@ -1747,6 +2213,10 @@ async function catalogInputText(
   return input;
 }
 
+function isCompatibleCatalogFormat(format: unknown): format is string {
+  return format === CATALOG_FORMAT || format === RETIRED_CATALOG_NAME;
+}
+
 /**
  * Restores ratings, labels, metadata, snapshots, and non-destructive edits onto
  * image blobs already present in this browser catalog. Missing source images are
@@ -1758,7 +2228,7 @@ export async function importCatalog(
   await flushCatalogWrites();
   const parsed = await catalogInputText(input);
   if (!isObject(parsed)) throw new Error("The catalog must contain a JSON object.");
-  if (parsed.format !== CATALOG_FORMAT) {
+  if (!isCompatibleCatalogFormat(parsed.format)) {
     throw new Error("This file is not a compatible Lightroom local catalog export.");
   }
   if (parsed.version !== CATALOG_EXPORT_VERSION) {
