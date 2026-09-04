@@ -2,7 +2,6 @@ import { ChevronDown } from "lucide-react";
 import type { ReactNode } from "react";
 import type { ExportSettings, PhotoRecord } from "../types";
 import { Modal } from "./ui";
-import "./ExportDialog.css";
 
 type ExportDialogProps = {
   photo: PhotoRecord;
@@ -171,7 +170,7 @@ export default function ExportDialog({
             <div className="lrc-export-presets__group">
               <div className="lrc-export-presets__group-title">
                 <ChevronDown size={11} strokeWidth={2.3} aria-hidden="true" />
-                <span>Lightroom Presets</span>
+                <span>Darkroom Presets</span>
               </div>
               <button
                 type="button"
@@ -278,7 +277,7 @@ export default function ExportDialog({
                   <input
                     type="text"
                     value={settings.fileName}
-                    placeholder={selectionCount > 1 ? "Lightroom_export" : "Untitled"}
+                    placeholder={selectionCount > 1 ? "Darkroom_export" : "Untitled"}
                     onChange={(event) =>
                       onChange({ ...settings, fileName: event.target.value })
                     }
@@ -521,7 +520,7 @@ export default function ExportDialog({
                     disabled
                     readOnly
                   />
-                  <span>Write Keywords as Lightroom Hierarchy</span>
+                  <span>Write Keywords as Hierarchy</span>
                 </label>
               </div>
             </ExportSection>

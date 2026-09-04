@@ -2,7 +2,10 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import App from "./App";
 import { RETIRED_STUDIO_NAMESPACE } from "./lib/retiredIdentity";
+import "./components/ExportDialog.css";
+import "./components/ImportDialog.css";
 import "./styles.css";
+import "./theme.css";
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
