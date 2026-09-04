@@ -111,7 +111,7 @@ export async function createSampleFile(): Promise<File> {
       0.92,
     ),
   );
-  return new File([blob], "Lightroom_sample_twilight.jpg", {
+  return new File([blob], "Darkroom_sample_twilight.jpg", {
     type: "image/jpeg",
     lastModified: Date.now(),
   });

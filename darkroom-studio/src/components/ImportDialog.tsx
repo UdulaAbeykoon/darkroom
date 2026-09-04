@@ -21,7 +21,6 @@ import type {
 } from "../types";
 import { isCameraRawFile } from "../lib/rawImage";
 import { Modal } from "./ui";
-import "./ImportDialog.css";
 
 type ImportCandidate = {
   id: string;

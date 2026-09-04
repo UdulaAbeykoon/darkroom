@@ -11,7 +11,7 @@ const SCOPE_URL = new URL(self.registration.scope);
 const CACHE_NAMESPACE = `${DARKROOM_CACHE_PREFIX}${encodeURIComponent(
   SCOPE_URL.pathname,
 )}-`;
-const CACHE_NAME = `${CACHE_NAMESPACE}app-v4`;
+const CACHE_NAME = `${CACHE_NAMESPACE}app-v6`;
 const RETIRED_CACHE_NAMESPACE = `${RETIRED_CACHE_PREFIX}${encodeURIComponent(
   SCOPE_URL.pathname,
 )}-`;
@@ -23,7 +23,12 @@ const APP_ENTRY_URL = new URL("./", SCOPE_URL);
 const APP_ASSET_URL = new URL("assets/", SCOPE_URL);
 const APP_STATIC_ASSETS = [
   new URL("manifest.webmanifest", SCOPE_URL).href,
-  new URL("icon.svg", SCOPE_URL).href,
+  new URL("icon-192.png", SCOPE_URL).href,
+  new URL("icon-512.png", SCOPE_URL).href,
+  new URL("icon-maskable-192.png", SCOPE_URL).href,
+  new URL("icon-maskable-512.png", SCOPE_URL).href,
+  new URL("favicon-32.png", SCOPE_URL).href,
+  new URL("apple-touch-icon.png", SCOPE_URL).href,
 ];
 const APP_SHELL = [
   APP_ENTRY_URL.href,

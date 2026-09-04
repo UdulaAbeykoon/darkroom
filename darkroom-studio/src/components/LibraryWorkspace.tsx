@@ -186,7 +186,7 @@ export default function LibraryWorkspace({
         <p className="eyebrow">Your private catalog</p>
         <h1>Bring the first frame into the light.</h1>
         <p className="empty-library__copy">
-          Originals stay untouched. Lightroom Classic Local keeps edit instructions in your browser and only
+          Originals stay untouched. Darkroom keeps edit instructions in your browser and only
           creates a new file when you export.
         </p>
         <div className="empty-library__actions">
