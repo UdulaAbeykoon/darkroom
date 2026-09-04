@@ -1,0 +1,19 @@
+{
+  "name": "Lightroom Classic — Local Workflow Study",
+  "short_name": "LrC Local",
+  "description": "A local-first reproduction of the Lightroom Classic catalog and Develop workflow.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#050505",
+  "theme_color": "#050505",
+  "icons": [
+    {
+      "src": "./icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
