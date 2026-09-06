@@ -8,7 +8,7 @@ import { normalizeCatalogEditState } from "./catalog";
 import { RETIRED_PROFILE_NAMESPACE } from "./retiredIdentity";
 
 describe("normalizeCatalogEditState", () => {
-  it("migrates an older recipe and supplies every new Lightroom control", () => {
+  it("migrates an older recipe and supplies every current control", () => {
     const legacy = createDefaultEditState() as unknown as Record<string, unknown>;
     legacy.profile = `${RETIRED_PROFILE_NAMESPACE} Vivid`;
     delete legacy.redCurve;
@@ -24,7 +24,7 @@ describe("normalizeCatalogEditState", () => {
 
     const migrated = normalizeCatalogEditState(legacy);
 
-    expect(migrated.profile).toBe("Adobe Vivid");
+    expect(migrated.profile).toBe("Darkroom Vivid");
     expect(migrated.redCurve).toHaveLength(5);
     expect(migrated.pointColor.enabled).toBe(false);
     expect(migrated.lensCorrections.midpoint).toBe(50);

@@ -6,7 +6,7 @@ import {
 } from "./catalog";
 
 describe("import option normalization", () => {
-  it("uses safe Lightroom-style import defaults", () => {
+  it("uses safe import defaults", () => {
     expect(normalizeImportOptions()).toEqual({
       method: "add",
       duplicateHandling: "skip",

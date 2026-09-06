@@ -12,12 +12,13 @@ import { RETIRED_PROFILE_NAMESPACE } from "./lib/retiredIdentity";
 describe("default edit state", () => {
   it("normalizes profile names created by previous builds", () => {
     expect(canonicalProfileName(`${RETIRED_PROFILE_NAMESPACE} Neutral`)).toBe(
-      "Adobe Color",
+      "Darkroom Color",
     );
     expect(canonicalProfileName(`${RETIRED_PROFILE_NAMESPACE} Vivid`)).toBe(
-      "Adobe Vivid",
+      "Darkroom Vivid",
     );
-    expect(canonicalProfileName("Adobe Portrait")).toBe("Adobe Portrait");
+    expect(canonicalProfileName("Adobe Portrait")).toBe("Darkroom Portrait");
+    expect(canonicalProfileName("Darkroom Portrait")).toBe("Darkroom Portrait");
     expect(canonicalProfileName("Previous Vivid")).toBe("Previous Vivid");
     expect(canonicalProfileName("Custom Flat Profile")).toBe(
       "Custom Flat Profile",

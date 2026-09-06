@@ -147,19 +147,30 @@ export const DEFAULT_TONE_CURVE: ToneCurvePoint[] = [
 ];
 
 const LEGACY_PROFILE_FAMILIES: Record<string, string> = {
-  Neutral: "Adobe Color",
-  Vivid: "Adobe Vivid",
-  Portrait: "Adobe Portrait",
-  Landscape: "Adobe Landscape",
-  Monochrome: "Adobe Monochrome",
+  Neutral: "Darkroom Color",
+  Vivid: "Darkroom Vivid",
+  Portrait: "Darkroom Portrait",
+  Landscape: "Darkroom Landscape",
+  Monochrome: "Darkroom Monochrome",
+};
+
+const LEGACY_ADOBE_PROFILES: Record<string, string> = {
+  "Adobe Color": "Darkroom Color",
+  "Adobe Vivid": "Darkroom Vivid",
+  "Adobe Portrait": "Darkroom Portrait",
+  "Adobe Landscape": "Darkroom Landscape",
+  "Adobe Monochrome": "Darkroom Monochrome",
 };
 
 /**
- * Converts two-part profile names written by older builds to the current Adobe
- * equivalents without coupling the catalog to a retired product name.
+ * Converts profile names written by older builds to Darkroom's current names.
  */
 export function canonicalProfileName(profile: string): string {
-  const parts = profile.trim().split(/\s+/);
+  const trimmed = profile.trim();
+  if (LEGACY_ADOBE_PROFILES[trimmed]) {
+    return LEGACY_ADOBE_PROFILES[trimmed];
+  }
+  const parts = trimmed.split(/\s+/);
   if (parts.length !== 2 || parts[0] !== RETIRED_PROFILE_NAMESPACE) {
     return profile;
   }
@@ -167,7 +178,7 @@ export function canonicalProfileName(profile: string): string {
 }
 
 export const createDefaultEditState = (): EditState => ({
-  profile: "Adobe Color",
+  profile: "Darkroom Color",
   global: { ...DEFAULT_GLOBAL_ADJUSTMENTS },
   curve: structuredClone(DEFAULT_TONE_CURVE),
   redCurve: structuredClone(DEFAULT_TONE_CURVE),

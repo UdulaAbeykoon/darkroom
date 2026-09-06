@@ -17,7 +17,7 @@ describe("applyPresetAtAmount", () => {
     expect(next.global.highlights).toBe(preset.adjustments.highlights);
   });
 
-  it("interpolates and supports Lightroom's 200 percent extension", () => {
+  it("interpolates and supports the 200 percent extension", () => {
     const base = createDefaultEditState();
     base.global.exposure = -0.1;
     const half = applyPresetAtAmount(base, preset, 50);

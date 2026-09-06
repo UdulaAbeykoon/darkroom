@@ -394,7 +394,7 @@ function EditInspector(props: InspectorProps) {
       >
         <div className="basic-mode-actions">
           <button type="button" onClick={props.onAutoAdjust}>Auto</button>
-          <button type="button" onClick={() => props.onProfileChange("Adobe Monochrome")}>B&amp;W</button>
+          <button type="button" onClick={() => props.onProfileChange("Darkroom Monochrome")}>B&amp;W</button>
           <button type="button" disabled title="HDR merge requires bracketed source files">HDR</button>
         </div>
         <div className="profile-row profile-row--classic">
@@ -404,11 +404,11 @@ function EditInspector(props: InspectorProps) {
             value={canonicalProfileName(edits.profile)}
             onChange={(event) => props.onProfileChange(event.target.value)}
           >
-            <option value="Adobe Color">Adobe Color</option>
-            <option value="Adobe Vivid">Adobe Vivid</option>
-            <option value="Adobe Portrait">Adobe Portrait</option>
-            <option value="Adobe Landscape">Adobe Landscape</option>
-            <option value="Adobe Monochrome">Adobe Monochrome</option>
+            <option value="Darkroom Color">Darkroom Color</option>
+            <option value="Darkroom Vivid">Darkroom Vivid</option>
+            <option value="Darkroom Portrait">Darkroom Portrait</option>
+            <option value="Darkroom Landscape">Darkroom Landscape</option>
+            <option value="Darkroom Monochrome">Darkroom Monochrome</option>
           </select>
         </div>
         <div className="basic-group-label"><span>WB</span><small>As Shot</small></div>
@@ -2127,7 +2127,7 @@ function HealInspector(props: Pick<
         ) : null}
         {props.healSettings.mode === "remove" ? (
           <div className="remove-ai-options" aria-label="Remove options">
-            <label className="toggle-field" title="Requires an Adobe Firefly connection; unavailable in this local build">
+            <label className="toggle-field" title="Requires a connected generative model; unavailable in this local build">
               <input type="checkbox" disabled />
               <span>Use generative AI</span>
               <Info size={12} aria-hidden="true" />

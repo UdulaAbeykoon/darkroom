@@ -1,5 +1,5 @@
 /**
- * Pure geometry for Lightroom-style Guided Upright corrections.
+ * Pure geometry for guided upright corrections.
  *
  * Guide coordinates are normalized source-image coordinates: (0, 0) is the
  * top-left and (1, 1) is the bottom-right. The returned correction uses the

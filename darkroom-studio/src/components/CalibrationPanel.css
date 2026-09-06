@@ -57,7 +57,7 @@
   cursor: default;
 }
 
-/* Lightroom identifies the camera-primary channels with restrained color in
+/* Identify the camera-primary channels with restrained color in
    the track itself; neutral middle stops keep zero easy to locate. */
 .calibration-panel__group--shadows .adjustment-slider__input::-webkit-slider-runnable-track {
   background: linear-gradient(90deg, #5e9470 0%, #777 50%, #9e648d 100%);

@@ -4,7 +4,7 @@ import { createDefaultEditState } from "../defaults";
 import { mergeSynchronizedSettings } from "./syncSettings";
 
 describe("mergeSynchronizedSettings", () => {
-  it("copies the expanded Lightroom tone, detail, lens, blur, and calibration state", () => {
+  it("copies the expanded tone, detail, lens, blur, and calibration state", () => {
     const target = createDefaultEditState();
     const source = createDefaultEditState();
     source.redCurve[1].y = 0.42;
