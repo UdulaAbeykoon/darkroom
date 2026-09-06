@@ -13,7 +13,7 @@ const clampAmount = (amount: number) =>
 const mix = (from: number, to: number, factor: number) =>
   from + (to - from) * factor;
 
-/** Applies a preset relative to a stable base edit, matching Lightroom's Amount control. */
+/** Applies a preset relative to a stable base edit through the Amount control. */
 export function applyPresetAtAmount(
   base: EditState,
   preset: DevelopPreset,

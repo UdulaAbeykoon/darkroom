@@ -1,9 +1,8 @@
 # Darkroom
 
-Darkroom is a free, local-first photo catalog and non-destructive editor inspired
-by the Lightroom Classic 2026 workspace and the project's reference walkthrough.
-It is an independent educational implementation, not an Adobe product and not
-affiliated with or endorsed by Adobe.
+Darkroom is a free, local-first photo catalog and non-destructive editor for
+desktop browsers. It is an independent project and is not affiliated with,
+endorsed by, or sponsored by Adobe.
 
 All project files live inside this folder. The app has no filesystem write
 handle to imported source photos: it never moves, overwrites, or deletes them.
@@ -50,7 +49,7 @@ installation is intended for a dedicated HTTPS deployment origin or subpath.
   vibrance, saturation, texture, clarity, dehaze, sharpening, noise reduction,
   vignette, and grain
 - Editable composite/red/green/blue tone curves; eight-channel HSL plus Point
-  Color; interactive three-way color grading; full Lightroom-style sharpening
+  Color; interactive three-way color grading; detailed sharpening
   and noise-reduction groups
 - Functional Lens Corrections, Transform, Lens Blur, Effects, and Calibration
   recipes, including local profile/manual correction approximations, focal
@@ -93,8 +92,8 @@ LibRaw worker to an 8-bit sRGB working image; the original RAW bytes are kept
 unchanged. Files over 48 MB use LibRaw's half-size mode to keep peak browser
 memory bounded. RAW support therefore does not claim a native 16-bit linear
 pipeline. Semantic and depth selections are explicitly labelled local estimates;
-they are deterministic offline heuristics, not Adobe's
-proprietary cloud/ML models. Heal is a luminance-matched clone
+they are deterministic offline heuristics, not proprietary cloud/ML models.
+Heal is a luminance-matched clone
 approximation. Browser encoders do not preserve EXIF reliably, and very large
 exports are bounded by the GPU's texture/viewport limit. Imports are capped at
 256 MB per file to avoid exhausting a browser tab.

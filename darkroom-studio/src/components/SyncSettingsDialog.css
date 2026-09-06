@@ -1,4 +1,4 @@
-/* Lightroom Classic uses a compact native macOS-style settings sheet. */
+/* Compact native macOS-style settings sheet. */
 
 .modal:has(> .modal__body > .sync-settings-dialog) {
   width: min(560px, calc(100vw - 24px));

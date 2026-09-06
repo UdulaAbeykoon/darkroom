@@ -1,8 +1,9 @@
-# Lightroom Classic 2026 reference specification
+# Product research notes
 
-This implementation targets the Lightroom **Classic** desktop workspace shown in
-the user-supplied 2026 walkthrough—not the cloud Lightroom desktop topology.
-The reference is the [user-supplied Lightroom Classic 2026 walkthrough](https://www.youtube.com/watch?v=KhocKi5a0Ho).
+Early interaction research used a publicly available walkthrough of Adobe
+Lightroom Classic as one reference for established desktop photo-editing
+workflows. The reference was the
+[Lightroom Classic 2026 walkthrough](https://www.youtube.com/watch?v=KhocKi5a0Ho).
 
 This repository is an independent, local clean-room implementation. Product
 names are used only to identify the interface being studied; no Adobe source
@@ -15,7 +16,7 @@ included.
 | --- | --- | --- |
 | 0:36 | Import Process | Three-pane Import workspace; Source rail; Copy as DNG, Copy, Move, and Add method selector; checked contact sheet; File Handling, File Renaming, Apply During Import, and Destination panels; Import/Cancel footer. |
 | 2:59 | Develop Tab | Black Classic module bar; Library/Develop modules; Navigator and Presets on the left; image on a neutral-gray matte; histogram, horizontal tool row, stacked inspector, and filmstrip. |
-| 5:29 | Basic | Profile, WB, Tone, and Presence groups with Lightroom ranges, neutral diamond slider handles, Auto and B&W actions. |
+| 5:29 | Basic | Profile, WB, Tone, and Presence groups, neutral diamond slider handles, Auto and B&W actions. |
 | 11:33 | Tone Curve | Editable composite RGB curve plus independently editable red, green, and blue channel curves. |
 | 13:45 | Color Mixer | Eight-channel Hue/Saturation/Luminance mixer and functional Point Color range adjustments. |
 | 17:24 | Color Grading | Shadows, Midtones, and Highlights color wheels with Hue, Saturation, Luminance, Blending, and Balance. |
@@ -40,7 +41,7 @@ included.
 - Horizontal tool row: approximately 42 px.
 - Filmstrip: approximately 60–62 px.
 - Develop matte: neutral middle gray; panels use dark graphite with restrained
-  one-pixel separators and Lightroom blue for active/focused state.
+  one-pixel separators and blue for active/focused state.
 - Inspector order is fixed: Basic, Tone Curve, Color Mixer, Color Grading,
   Detail, Lens Corrections, Transform, Lens Blur, Effects, Calibration.
 - The module list is Library, Develop, Map, Book, Slideshow, Print, Web. Modules
@@ -58,12 +59,12 @@ in IndexedDB. It uses a WebGL2 editing pipeline with a Canvas2D fallback and
 keeps imported source files untouched. Browser-decodable JPEG, PNG, WebP, GIF,
 BMP, and browser-supported TIFF/HEIC files can be edited and exported locally.
 
-Native RAW demosaic, Adobe camera/lens profile databases, 16-bit wide-gamut
-output, tethered capture, panorama/HDR merge, map tiles, printing, and Adobe's
-proprietary segmentation/depth models require a native/WASM integration or
+Native RAW demosaic, proprietary camera/lens profile databases, 16-bit
+wide-gamut output, tethered capture, panorama/HDR merge, map tiles, printing,
+and proprietary segmentation/depth models require a native/WASM integration or
 licensed data that this clean-room browser build does not contain. Browser-local
-features must remain functional approximations and must not claim to use Adobe
-profiles or ML when they do not.
+features remain functional approximations and must not claim integrations they
+do not provide.
 
 ## Open-source and licensing notes
 

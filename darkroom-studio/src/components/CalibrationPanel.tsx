@@ -57,7 +57,7 @@ function isAtDefault(value: CalibrationAdjustments) {
 }
 
 /**
- * Lightroom Classic's camera-primary calibration controls. The component is
+ * Camera-primary calibration controls. The component is
  * controlled so callers can include every interaction in their edit history.
  */
 export function CalibrationPanel({

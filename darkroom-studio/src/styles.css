@@ -1,4 +1,4 @@
-/* Lightroom Classic local workflow study — desktop darkroom. */
+/* Local photo workflow — desktop darkroom. */
 
 :root {
   color-scheme: dark;
@@ -3053,7 +3053,7 @@ input[type="checkbox"] {
   }
 }
 
-/* Lightroom Classic reference pass — dense neutral desktop chrome. */
+/* Dense neutral desktop chrome. */
 :root {
   --ink-0: #111111;
   --ink-1: #1f1f1f;
@@ -7760,7 +7760,7 @@ input[type="checkbox"] {
   }
 }
 
-/* Current Lightroom-style catalog and edit-panel topology. */
+/* Current catalog and edit-panel topology. */
 
 .topbar {
   grid-template-columns: minmax(310px, 1fr) minmax(240px, 460px) minmax(310px, 1fr);
@@ -8025,7 +8025,7 @@ input[type="checkbox"] {
   }
 }
 
-/* Final Classic rail overrides: horizontal tool strip and Lightroom footers. */
+/* Final rail overrides: horizontal tool strip and workspace footers. */
 body {
   font-size: 11px;
 }
@@ -8409,7 +8409,7 @@ body {
   font-size: 7px;
 }
 
-/* Lightroom-style Remove workspace. */
+/* Remove workspace. */
 
 .remove-inspector {
   color: #c6c7c4;
@@ -8711,7 +8711,7 @@ body {
   background: rgb(20 20 20 / 0.38);
 }
 
-/* Presets are organized like Lightroom's disclosure-based preset browser. */
+/* Disclosure-based preset browser. */
 .preset-group {
   display: grid;
   min-width: 0;

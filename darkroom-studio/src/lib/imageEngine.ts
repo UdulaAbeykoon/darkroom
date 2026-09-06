@@ -166,7 +166,7 @@ const percentage = (value: number): number => clamp(value / 100);
 /**
  * Strength of the browser's generic lens-profile approximation. The Setup
  * choices intentionally produce distinct, deterministic results even when a
- * proprietary Adobe lens profile is unavailable.
+ * proprietary manufacturer lens profile is unavailable.
  */
 export const lensProfileCorrectionStrength = (
   lens: EditState["lensCorrections"],
@@ -195,7 +195,7 @@ export const normalizeRepairRadius = (value: number, referencePixels: number): n
   const safe = Math.max(1, referencePixels);
   if (!Number.isFinite(value) || value <= 0) return 0;
   // Values at or below one are retained for legacy catalogs that stored a
-  // normalized diameter. Current repairs store Lightroom-style source pixels.
+  // normalized diameter. Current repairs store normalized source pixels.
   if (value <= 1) return value * 0.5;
   return value / safe / 2;
 };
@@ -436,7 +436,7 @@ export const averageColorSamples = (
 export type DefringeHueFamily = "purple" | "green";
 
 /**
- * Lightroom's hue-range controls are 0...100 positions within a family band,
+ * Hue-range controls are 0...100 positions within a family band,
  * not raw degrees. Purple spans blue through red (and wraps the hue wheel),
  * while green spans yellow through aqua/blue.
  */
@@ -1054,10 +1054,10 @@ const processGlobalCpu = (
 
 const profileIndex = (profile: string): number => {
   const canonical = canonicalProfileName(profile);
-  if (canonical === "Adobe Vivid") return 1;
-  if (canonical === "Adobe Portrait") return 2;
-  if (canonical === "Adobe Landscape") return 3;
-  if (canonical === "Adobe Monochrome") return 4;
+  if (canonical === "Darkroom Vivid") return 1;
+  if (canonical === "Darkroom Portrait") return 2;
+  if (canonical === "Darkroom Landscape") return 3;
+  if (canonical === "Darkroom Monochrome") return 4;
   return 0;
 };
 
