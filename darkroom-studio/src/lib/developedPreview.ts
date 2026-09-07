@@ -50,25 +50,6 @@ let activeRenders = 0;
 const clamp = (value: number, min: number, max: number) =>
   Math.min(max, Math.max(min, Number.isFinite(value) ? value : min));
 
-function canonicalJson(value: unknown): string {
-  return JSON.stringify(value, (_key, nested) => {
-    if (
-      nested &&
-      typeof nested === "object" &&
-      !Array.isArray(nested)
-    ) {
-      return Object.keys(nested as Record<string, unknown>)
-        .sort()
-        .reduce<Record<string, unknown>>((sorted, key) => {
-          const item = (nested as Record<string, unknown>)[key];
-          if (item !== undefined) sorted[key] = item;
-          return sorted;
-        }, {});
-    }
-    return nested;
-  });
-}
-
 function hashString(value: string): string {
   // Two independent 32-bit accumulators make accidental cache collisions
   // vanishingly unlikely while keeping DOM-facing keys compact.
@@ -96,9 +77,8 @@ export function editRevision(edits: EditState): string {
   const memoized = revisionMemo.get(reference);
   if (memoized) return memoized;
 
-  // Edit updates preserve references for untouched top-level sections. Hashing
-  // those sections independently avoids walking large brush masks on every
-  // exposure-slider frame while retaining a deterministic content revision.
+  // Share tokens recursively: changing a mask's exposure or gradient must not
+  // serialize all its saved brush points for navigator / filmstrip previews.
   const structuralToken = (value: unknown): string => {
     if (!value || typeof value !== "object") {
       return `${typeof value}:${String(value)}`;
@@ -106,7 +86,11 @@ export function editRevision(edits: EditState): string {
     const object = value as object;
     const cached = structuralRevisionMemo.get(object);
     if (cached) return cached;
-    const serialized = canonicalJson(value);
+    const serialized = Array.isArray(value)
+      ? `array:${JSON.stringify(value.map(structuralToken))}`
+      : `object:${JSON.stringify(Object.keys(value).sort()
+          .filter(key => (value as Record<string, unknown>)[key] !== undefined)
+          .map(key => [key, structuralToken((value as Record<string, unknown>)[key])]))}`;
     const token = `${hashString(serialized)}-${serialized.length.toString(36)}`;
     structuralRevisionMemo.set(object, token);
     return token;
