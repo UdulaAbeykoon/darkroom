@@ -65,6 +65,9 @@ export function AdjustmentSlider({
   disabled?: boolean;
 }) {
   const [displayValue, setDisplayValue] = useState(value);
+  const [editingNumber, setEditingNumber] = useState(false);
+  const [numberText, setNumberText] = useState(String(value));
+  const cancelNumberRef = useRef(false);
   const interactionRef = useRef(false);
   const frameRef = useRef<number | null>(null);
   const latestValueRef = useRef(value);
@@ -147,6 +150,7 @@ export function AdjustmentSlider({
     <label
       className={`adjustment-slider ${disabled ? "is-disabled" : ""}`}
       onDoubleClick={(event) => {
+        if (disabled || (event.target as HTMLElement).closest(".adjustment-slider__number")) return;
         event.preventDefault();
         onBegin?.();
         latestValueRef.current = defaultValue;
@@ -160,6 +164,7 @@ export function AdjustmentSlider({
       <input
         className="adjustment-slider__input"
         type="range"
+        aria-label={label}
         min={min}
         max={max}
         step={step}
@@ -179,7 +184,31 @@ export function AdjustmentSlider({
         }}
         onKeyUp={commitInteraction}
       />
-      <output className="adjustment-slider__value">{display}</output>
+      {editingNumber ? (
+        <input className="text-input adjustment-slider__number" type="number" aria-label={`${label} value`}
+          min={min} max={max} step={step} value={numberText} autoFocus
+          onFocus={event => event.currentTarget.select()}
+          onClick={event => event.stopPropagation()}
+          onChange={event => setNumberText(event.target.value)}
+          onBlur={() => {
+            const number = Number(numberText);
+            if (!cancelNumberRef.current && numberText.trim() && Number.isFinite(number)) {
+              beginInteraction(); scheduleChange(Number(Math.min(max, Math.max(min, Math.round(number / step) * step)).toFixed(6))); commitInteraction();
+            }
+            cancelNumberRef.current = false; setEditingNumber(false);
+          }}
+          onKeyDown={event => {
+            event.stopPropagation();
+            if (event.key === "Escape") { cancelNumberRef.current = true; event.currentTarget.blur(); }
+            if (event.key === "Enter") { event.preventDefault(); event.currentTarget.blur(); }
+          }} />
+      ) : (
+        <button type="button" className="adjustment-slider__value" disabled={disabled}
+          aria-label={`Set ${label} value`} title={`Enter an exact value for ${label}`}
+          onClick={event => { event.preventDefault(); setNumberText(String(Number(displayValue.toFixed(3)))); setEditingNumber(true); }}>
+          {display}
+        </button>
+      )}
     </label>
   );
 }

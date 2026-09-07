@@ -36,6 +36,19 @@ const GROUPS = [
     ],
   },
   {
+    title: "Masking",
+    shortcuts: [
+      ["Shift W", "Open masking"],
+      ["O", "Show / hide mask overlay"],
+      ["[ / ]", "Brush size"],
+      ["Shift [ / ]", "Brush feather"],
+      ["X", "Switch paint / erase"],
+      ["Alt / Option", "Temporarily erase"],
+      ["Shift + drag", "Constrain gradient / proportions"],
+      ["Esc", "Cancel current stroke or gradient"],
+    ],
+  },
+  {
     title: "Organize",
     shortcuts: [
       ["P", "Flag as pick"],
