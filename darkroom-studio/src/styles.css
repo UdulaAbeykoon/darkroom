@@ -8840,3 +8840,31 @@ body {
 .preset-swatch--hard-mono {
   background: linear-gradient(135deg, #171817 0 46%, #b5b5ad 47% 100%);
 }
+
+/* Compact numeric entry preserves the inspector's established slider rhythm. */
+button.adjustment-slider__value {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: text;
+  font: inherit;
+  font-size: 10px;
+}
+button.adjustment-slider__value:hover {
+  color: var(--brand-frost);
+  text-decoration: underline;
+}
+.adjustment-slider__number {
+  width: 100%;
+  min-width: 0;
+  height: 22px;
+  padding: 1px 3px;
+  font: inherit;
+  font-size: 10px;
+  text-align: right;
+  appearance: textfield;
+}
+.adjustment-slider__number::-webkit-inner-spin-button { appearance: none; }
+.mask-create-compact-option--card strong { white-space: normal; line-height: 1.4; }
+.mask-create-compact__cards { align-items: stretch; }
+.mask-create-compact-option--card { min-height: 74px; }

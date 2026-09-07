@@ -76,11 +76,8 @@ import { mergeSynchronizedSettings } from "./lib/syncSettings";
 import { CROP_OVERLAY_SEQUENCE } from "./types";
 import {
   getMaskComponents,
-  legacyRegionForPeopleFeatures,
   makeMaskComponent,
   normalizeMasks,
-  normalizePeopleFeatures,
-  PEOPLE_FEATURE_LABELS,
   updateMaskComponent as updateMaskComponentInGroup,
 } from "./lib/maskMath";
 import { createSampleFile } from "./lib/sample";
@@ -106,7 +103,6 @@ import type {
   MaskComponent,
   MaskKind,
   MaskOperation,
-  PeopleFeature,
   PhotoRecord,
   UprightGuide,
   WorkspaceMode,
@@ -242,7 +238,7 @@ export default function App() {
     size: 34,
     feather: 72,
     opacity: 100,
-    mode: "remove",
+    mode: "heal",
   });
   const [activeHealSpotId, setActiveHealSpotId] = useState<string | null>(null);
   const [healOverlayMode, setHealOverlayMode] = useState<HealOverlayMode>("always");
@@ -252,7 +248,7 @@ export default function App() {
   const [maskBrushSettings, setMaskBrushSettings] = useState<MaskBrushSettings>({
     size: 34,
     feather: 65,
-    flow: 82,
+    flow: 100,
     density: 100,
     autoMask: false,
     erase: false,
@@ -1372,64 +1368,11 @@ export default function App() {
         return;
       }
       beginEdit();
+      setShowMaskOverlay(true);
       const mask = maskDefaults(kind, activePhoto.edits.masks.length);
       updateEditState((edits) => ({ ...edits, masks: [...edits.masks, mask] }));
       setActiveMaskId(mask.id);
       setActiveMaskComponentId(mask.components?.[0]?.id ?? null);
-      setTool("mask");
-      commitEdit();
-    },
-    [activePhoto, beginEdit, commitEdit, notify, updateEditState],
-  );
-
-  const createPeopleMasks = useCallback(
-    (requestedFeatures: PeopleFeature[], separate: boolean) => {
-      if (!activePhoto) return;
-      const features = normalizePeopleFeatures(requestedFeatures);
-      const featureSets = separate
-        ? features.map((feature) => [feature])
-        : [features];
-      if (activePhoto.edits.masks.length + featureSets.length > 8) {
-        notify(
-          `Creating ${featureSets.length} separate people masks would exceed the eight-mask limit.`,
-        );
-        return;
-      }
-
-      const masks = featureSets.map((featureSet, index) => {
-        const mask = maskDefaults(
-          "people",
-          activePhoto.edits.masks.length + index,
-        );
-        const people = {
-          region: legacyRegionForPeopleFeatures(featureSet),
-          features: [...featureSet],
-          personId: "person-1" as const,
-        };
-        const featureName = featureSet
-          .map((feature) => PEOPLE_FEATURE_LABELS[feature])
-          .join(" + ");
-        const name = `Person 1 · ${featureName}`;
-        const component = mask.components?.[0];
-        return {
-          ...mask,
-          name,
-          people,
-          components: component
-            ? [{ ...component, name: featureName, people }]
-            : [],
-        };
-      });
-      const firstMask = masks[0];
-      if (!firstMask) return;
-
-      beginEdit();
-      updateEditState((edits) => ({
-        ...edits,
-        masks: [...edits.masks, ...masks],
-      }));
-      setActiveMaskId(firstMask.id);
-      setActiveMaskComponentId(firstMask.components?.[0]?.id ?? null);
       setTool("mask");
       commitEdit();
     },
@@ -1456,6 +1399,7 @@ export default function App() {
 
   const updateMask = useCallback(
     (id: string, patch: Partial<Mask>) => {
+      if (patch.amount !== undefined || patch.curve || patch.grain || patch.adjustments) setShowMaskOverlay(false);
       updateEditState((edits) => ({
         ...edits,
         masks: edits.masks.map((mask) => (mask.id === id ? { ...mask, ...patch } : mask)),
@@ -1466,6 +1410,7 @@ export default function App() {
 
   const addMaskComponent = useCallback(
     (maskId: string, kind: MaskKind, operation: MaskOperation) => {
+      setShowMaskOverlay(true);
       const component = makeMaskComponent(kind, operation);
       beginEdit();
       updateEditState((edits) => ({
@@ -1506,6 +1451,7 @@ export default function App() {
 
   const updateMaskAdjustments = useCallback(
     (id: string, patch: Partial<LocalAdjustments>) => {
+      setShowMaskOverlay(false);
       updateEditState((edits) => ({
         ...edits,
         masks: edits.masks.map((mask) =>
@@ -1870,8 +1816,29 @@ export default function App() {
         cycleCropOverlay();
         return;
       }
-      if (isTyping(event.target)) return;
+      const target = event.target as HTMLElement | null;
+      if (singleKeyShortcuts && mode === "develop" && tool === "mask" && !event.metaKey && !event.ctrlKey && !target?.closest("input, textarea, select") && !target?.isContentEditable) {
+        if (event.key.toLowerCase() === "o") { event.preventDefault(); setShowMaskOverlay(v => !v); return; }
+        if (event.key === "[" || event.key === "]" || event.key === "{" || event.key === "}") {
+          event.preventDefault();
+          setMaskBrushSettings(settings => event.shiftKey
+            ? { ...settings, feather: Math.max(0, Math.min(100, settings.feather + (event.key === "}" ? 5 : -5))) }
+            : { ...settings, size: Math.max(0.1, Math.min(100, settings.size + (event.key === "]" ? 1 : -1))) });
+          return;
+        }
+        if (event.key.toLowerCase() === "x") { event.preventDefault(); setMaskBrushSettings(settings => ({ ...settings, erase: !settings.erase })); return; }
+      }
       const meta = event.metaKey || event.ctrlKey;
+      // Buttons and range controls keep focus after editing. Command/Ctrl-Z
+      // must still undo the edit there; text fields keep their native undo.
+      if (meta && event.key.toLowerCase() === "z" && !target?.isContentEditable &&
+        !target?.closest('textarea, select, input:not([type="range"]):not([type="checkbox"]):not([type="radio"])')) {
+        event.preventDefault();
+        if (event.shiftKey) redo();
+        else undo();
+        return;
+      }
+      if (isTyping(event.target)) return;
       if (meta && event.shiftKey && event.key.toLowerCase() === "i") {
         event.preventDefault();
         fileInputRef.current?.click();
@@ -1880,12 +1847,6 @@ export default function App() {
       if (meta && event.shiftKey && event.key.toLowerCase() === "e") {
         event.preventDefault();
         if (activePhoto) setShowExport(true);
-        return;
-      }
-      if (meta && event.key.toLowerCase() === "z") {
-        event.preventDefault();
-        if (event.shiftKey) redo();
-        else undo();
         return;
       }
       if (!singleKeyShortcuts) return;
@@ -1934,6 +1895,8 @@ export default function App() {
         setLibraryView("detail");
       } else if (event.key.toLowerCase() === "d") {
         if (activePhoto) setMode("develop");
+      } else if (event.shiftKey && event.key.toLowerCase() === "w") {
+        setMode("develop"); setTool("mask");
       } else if (event.key.toLowerCase() === "r") {
         setMode("develop");
         setTool("crop");
@@ -2399,7 +2362,6 @@ export default function App() {
             onUprightGuidesChange={applyGuidedUprightGuides}
             onCropChange={(crop) => updateEditState((edits) => ({ ...edits, crop }))}
             onCreateMask={createMask}
-            onCreatePeopleMasks={createPeopleMasks}
             onSelectMask={selectMask}
             onSelectMaskComponent={selectMaskComponent}
             onAddMaskComponent={addMaskComponent}
