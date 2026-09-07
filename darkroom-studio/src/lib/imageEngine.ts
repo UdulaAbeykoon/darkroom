@@ -1,5 +1,6 @@
 import type {
   BrushPoint,
+  BrushStroke,
   EditState,
   ExportSettings,
   GlobalAdjustments,
@@ -13,10 +14,10 @@ import type {
   ToneCurvePoint,
 } from "../types";
 import {
-  composeMaskWeight,
   getMaskComponents,
   normalizePeopleFeatures,
 } from "./maskMath";
+import { BrushRasterizer, fullMaskRect, gradientSampler, gradientWeight, unionMaskRect, type MaskDirtyRect } from "./maskGeometry";
 import { expandHealPaths, type HealDab } from "./healPath";
 import { canonicalProfileName } from "../defaults";
 
@@ -1171,6 +1172,10 @@ uniform vec4 uMaskAdjust1[MAX_MASKS];
 uniform vec4 uMaskAdjust2[MAX_MASKS];
 uniform vec4 uMaskAdjust3[MAX_MASKS];
 uniform vec4 uMaskAdjust4[MAX_MASKS];
+uniform int uLocalCurveCount[MAX_MASKS];
+uniform vec2 uLocalCurves[MAX_MASKS * MAX_CURVE_POINTS];
+uniform float uLocalAmount[MAX_MASKS];
+uniform vec4 uMaskGrain[MAX_MASKS];
 uniform int uActiveMask;
 uniform bool uShowMaskOverlay;
 uniform vec3 uOverlayColor;
@@ -1618,16 +1623,49 @@ float brushMask(int index, vec2 uv) {
     vec2(1.0 - 0.5 * uMaskCellTexel)
   );
   vec2 atlasUv = (vec2(column, row) + safeUv) / vec2(4.0, 2.0);
-  return texture(uBrushAtlas, atlasUv).a;
+  return texture(uBrushAtlas, atlasUv).r;
 }
 
 float maskWeight(int index, vec2 uv, vec3 color) {
   float value = brushMask(index, uv);
+  if (uMaskKind[index] == 1 || uMaskKind[index] == 4) {
+    vec4 g = uMaskData0[index];
+    vec2 direction = (g.zw - g.xy) * uSourceSize;
+    float lengthSquared = dot(direction, direction);
+    value = lengthSquared < 0.0001 ? 0.0 : 1.0 - smoothstep(0.0, 1.0, dot((uv - g.xy) * uSourceSize, direction) / lengthSquared);
+  } else if (uMaskKind[index] == 2 || uMaskKind[index] == 5) {
+    vec4 g = uMaskData0[index];
+    vec4 d = uMaskData1[index];
+    vec2 delta = (uv - g.xy) * uSourceSize;
+    vec2 local = vec2(cos(d.x) * delta.x + sin(d.x) * delta.y, -sin(d.x) * delta.x + cos(d.x) * delta.y);
+    float radius = length(local / max(vec2(0.0001), g.zw * uSourceSize));
+    value = d.y <= 0.0 ? (radius <= 1.0 ? 1.0 : 0.0) : 1.0 - smoothstep(1.0 - d.y, 1.0, radius);
+  }
+  if (uMaskKind[index] != 0) {
+    if (uMaskData1[index].z > 0.5) value = 1.0 - value;
+    value *= uMaskData1[index].w;
+  }
+  if (uMaskKind[index] >= 4) value *= brushMask(index, uv);
   if (uMaskInverted[index] != 0) value = 1.0 - value;
   return saturate(value * uMaskOpacity[index]);
 }
 
-vec3 applyLocal(vec3 color, vec3 blurred, int index) {
+float localCurveValue(float value, int maskIndex) {
+  int count = uLocalCurveCount[maskIndex];
+  if (count < 2) return value;
+  int offset = maskIndex * MAX_CURVE_POINTS;
+  vec2 previous = uLocalCurves[offset];
+  if (value <= previous.x) return previous.y;
+  for (int i = 1; i < MAX_CURVE_POINTS; i++) {
+    if (i >= count) break;
+    vec2 next = uLocalCurves[offset + i];
+    if (value <= next.x) return mix(previous.y, next.y, clamp((value - previous.x) / max(0.00001, next.x - previous.x), 0.0, 1.0));
+    previous = next;
+  }
+  return previous.y;
+}
+
+vec3 applyLocal(vec3 color, vec3 blurred, int index, vec2 uv) {
   vec4 local0 = uMaskAdjust0[index];
   vec4 local1 = uMaskAdjust1[index];
   vec4 local2 = uMaskAdjust2[index];
@@ -1657,6 +1695,15 @@ vec3 applyLocal(vec3 color, vec3 blurred, int index) {
   float defringe = saturate(local4.y / 100.0);
   float purple = saturate((adjusted.b + adjusted.r - adjusted.g * 2.0) * 2.4);
   adjusted = mix(adjusted, vec3(luma(adjusted)), purple * defringe * 0.72);
+  vec3 curved = vec3(localCurveValue(adjusted.r, index), localCurveValue(adjusted.g, index), localCurveValue(adjusted.b, index));
+  adjusted = mix(adjusted, curved, uLocalAmount[index]);
+  vec4 grain = uMaskGrain[index];
+  if (grain.x > 0.0) {
+    vec2 cell = floor(uv * vec2(uSourceSize.x / uSourceSize.y, 1.0) * 1200.0 / (1.0 + grain.y * 0.09));
+    // An integer-style modular pattern avoids CPU/GPU sine precision differences.
+    float noise = fract((mod(cell.x * 73.0 + cell.y * 151.0 + cell.x * cell.y * 3.0, 997.0)) / 997.0) - 0.5;
+    adjusted += noise * grain.x / 100.0 * uLocalAmount[index] * (0.08 + grain.z / 100.0 * 0.16);
+  }
   return saturate3(adjusted);
 }
 
@@ -1711,7 +1758,7 @@ void main() {
     if (index >= uMaskCount) break;
     float weight = maskWeight(index, uv, maskReferenceColor);
     if (weight > 0.0001) {
-      vec3 locallyAdjusted = applyLocal(color, blurred, index);
+      vec3 locallyAdjusted = applyLocal(color, blurred, index, uv);
       color = mix(color, locallyAdjusted, weight);
     }
     if (index == uActiveMask) activeWeight = weight;
@@ -1774,9 +1821,11 @@ export class ImageEngine {
   private histogramDirty = true;
   private histogramReadback: Uint8Array | null = null;
   private brushCellSize = BRUSH_CELL_SIZE;
-  private brushAtlasCanvas: HTMLCanvasElement | null = null;
-  private brushAtlasPixels: Uint8ClampedArray | null = null;
+  private brushAtlasCells: Uint8Array[] = [];
+  private readonly componentRasterCache = new Map<string, { component: MaskComponent; pixels: Float32Array; brush?: BrushRasterizer }>();
   private brushAtlasComponentGroups: MaskComponent[][] = [];
+  private brushAtlasFactors: boolean[] = [];
+  private readonly analyticOnlyAtlasGroup: MaskComponent[] = [];
   private brushAtlasPreviewWidth = 0;
   private brushAtlasPreviewHeight = 0;
   private brushAtlasCellSize = 0;
@@ -1830,6 +1879,8 @@ export class ImageEngine {
       this.resources = this.createGlResources(restored);
       if (this.sourceImage) this.uploadSourceTexture();
       this.brushAtlasComponentGroups = [];
+      this.brushAtlasCellSize = 0;
+      this.componentRasterCache.clear();
       if (this.lastState) this.render(this.lastState, this.lastOptions);
     } catch {
       this.resources = null;
@@ -1939,6 +1990,8 @@ export class ImageEngine {
     this.previewHeight = previewHeight;
     this.sourcePixels = null;
     this.brushAtlasComponentGroups = [];
+    this.brushAtlasCellSize = 0;
+    this.componentRasterCache.clear();
     this.healSpotSource = null;
     this.histogramReadback = null;
     this.histogram = blankHistogram();
@@ -2149,7 +2202,7 @@ export class ImageEngine {
     };
   }
 
-  public clientToImage(clientX: number, clientY: number): ImagePoint {
+  public clientToImage(clientX: number, clientY: number, unclamped = false): ImagePoint {
     if (!this.lastState || !this.lastGeometry || !this.sourceImage) {
       return { x: 0, y: 0, inside: false };
     }
@@ -2160,11 +2213,11 @@ export class ImageEngine {
     const localY =
       ((clientY - clientBounds.top) / Math.max(1e-6, clientBounds.height)) *
       this.cssHeight;
-    return this.canvasToImage(localX, localY);
+    return this.canvasToImage(localX, localY, unclamped);
   }
 
   /** Maps an unzoomed CSS pixel in the canvas viewport to source coordinates. */
-  public canvasToImage(canvasX: number, canvasY: number): ImagePoint {
+  public canvasToImage(canvasX: number, canvasY: number, unclamped = false): ImagePoint {
     if (!this.lastState || !this.lastGeometry || !this.sourceImage) {
       return { x: 0, y: 0, inside: false };
     }
@@ -2179,8 +2232,8 @@ export class ImageEngine {
     );
     const insideFrame = frameX >= 0 && frameX <= 1 && frameY >= 0 && frameY <= 1;
     return {
-      x: clamp(mapped.x),
-      y: clamp(mapped.y),
+      x: unclamped ? mapped.x : clamp(mapped.x),
+      y: unclamped ? mapped.y : clamp(mapped.y),
       inside: insideFrame && mapped.inside,
     };
   }
@@ -2531,8 +2584,8 @@ export class ImageEngine {
     this.resources = null;
     this.gl = null;
     this.context2d = null;
-    this.brushAtlasCanvas = null;
-    this.brushAtlasPixels = null;
+    this.brushAtlasCells = [];
+    this.componentRasterCache.clear();
     this.lastState = null;
     this.lastGeometry = null;
   }
@@ -3040,16 +3093,33 @@ export class ImageEngine {
     let activeIndex = -1;
     let overlayColor: Rgb = [1, 0.18, 0.1];
 
+    const localCurves = new Float32Array(MAX_MASKS * MAX_CURVE_POINTS * 2);
+    const localCurveCounts = new Int32Array(MAX_MASKS);
+    const localAmounts = new Float32Array(MAX_MASKS);
+    const localGrain = new Float32Array(MAX_MASKS * 4);
     masks.forEach((mask, index) => {
-      kinds[index] = this.maskKindIndex(mask);
+      localGrain.set([mask.grain?.amount ?? 0, mask.grain?.size ?? 25, mask.grain?.roughness ?? 50, 0], index * 4);
+      const curve = mask.curve ? sanitizeCurve(mask.curve) : [];
+      localCurveCounts[index] = curve.length;
+      localAmounts[index] = clamp(finite(mask.amount, 100) / 100, 0, 2);
+      curve.forEach((point, i) => localCurves.set([point.x, point.y], (index * MAX_CURVE_POINTS + i) * 2));
+      const components = this.cachedMaskComponents(mask);
+      const component = this.directGradient(components);
+      kinds[index] = component?.kind === "linear" ? 1 : component?.kind === "radial" ? 2 : 0;
+      if (component && components.filter(c => c.enabled && c.placed !== false).length > 1) kinds[index] += 3;
       inverted[index] = mask.inverted ? 1 : 0;
-      opacity[index] = normalizedPercent(mask.opacity);
+      opacity[index] = this.cachedMaskComponents(mask).some(c => c.placed !== false) ? normalizedPercent(mask.opacity) : 0;
       if (mask.id === options.activeMaskId) {
         activeIndex = index;
         overlayColor = parseColor(mask.overlayColor);
       }
-      this.packMaskData(mask, data0, data1, index);
-      const local = mask.adjustments;
+      if (component) {
+        this.packMaskData(component, data0, data1, index);
+        data1[index * 4 + 2] = component.inverted ? 1 : 0;
+        data1[index * 4 + 3] = component.opacity;
+      }
+      const amount = clamp(finite(mask.amount, 100) / 100, 0, 2);
+      const local = Object.fromEntries(Object.entries(mask.adjustments).map(([key, value]) => [key, value * amount])) as unknown as LocalAdjustments;
       adjust0.set(
         [
           finite(local.exposure),
@@ -3091,6 +3161,10 @@ export class ImageEngine {
         index * 4,
       );
     });
+    this.gl.uniform4fv(this.uniform("uMaskGrain[0]"), localGrain);
+    this.gl.uniform2fv(this.uniform("uLocalCurves[0]"), localCurves);
+    this.gl.uniform1iv(this.uniform("uLocalCurveCount[0]"), localCurveCounts);
+    this.gl.uniform1fv(this.uniform("uLocalAmount[0]"), localAmounts);
     this.gl.uniform1i(this.uniform("uMaskCount"), masks.length);
     this.gl.uniform1iv(this.uniform("uMaskKind[0]"), kinds);
     this.gl.uniform1iv(this.uniform("uMaskInverted[0]"), inverted);
@@ -3128,29 +3202,17 @@ export class ImageEngine {
     );
   }
 
-  private maskKindIndex(mask: Mask): number {
-    switch (mask.kind) {
-      case "brush":
-        return 0;
-      case "linear":
-        return 1;
-      case "radial":
-        return 2;
-      case "luminance":
-        return 3;
-      case "color":
-        return 4;
-      case "sky":
-        return 5;
-      case "subject":
-        return 6;
-      default:
-        return 0;
-    }
+  private directGradient(components: MaskComponent[]): MaskComponent | undefined {
+    const enabled = components.filter(component => component.enabled && component.placed !== false);
+    // Subtract/intersect components multiply the base gradient by a fixed
+    // coverage map. Moving that gradient therefore needs only GPU uniforms.
+    return enabled.length > 0 && enabled[0].operation === "add" &&
+      (enabled[0].kind === "linear" || enabled[0].kind === "radial") &&
+      enabled.slice(1).every(c => c.operation !== "add") ? enabled[0] : undefined;
   }
 
   private packMaskData(
-    mask: Mask,
+    mask: MaskComponent,
     data0: Float32Array,
     data1: Float32Array,
     index: number,
@@ -3211,47 +3273,120 @@ export class ImageEngine {
   }
 
   private updateBrushAtlas(masks: Mask[]): void {
-    const componentGroups = masks.map((mask) =>
-      this.cachedMaskComponents(mask),
-    );
-    const unchanged =
-      this.brushAtlasPreviewWidth === this.previewWidth &&
-      this.brushAtlasPreviewHeight === this.previewHeight &&
-      this.brushAtlasCellSize === this.brushCellSize &&
-      componentGroups.length === this.brushAtlasComponentGroups.length &&
-      componentGroups.every(
-        (components, index) =>
-          components === this.brushAtlasComponentGroups[index],
-      );
-    if (unchanged) return;
-    this.brushAtlasComponentGroups = componentGroups;
+    const factors: boolean[] = [];
+    const groups = masks.map(mask => {
+      const components = this.cachedMaskComponents(mask);
+      const direct = this.directGradient(components);
+      const enabled = components.filter(c => c.enabled && c.placed !== false);
+      factors.push(Boolean(direct && enabled.length > 1));
+      return direct ? enabled.length > 1 ? enabled.slice(1) : this.analyticOnlyAtlasGroup
+        : components.every(c => c.placed === false) ? this.analyticOnlyAtlasGroup : components;
+    });
+    const sameGroup = (group: MaskComponent[], index: number) => factors[index] === this.brushAtlasFactors[index] &&
+      group.length === this.brushAtlasComponentGroups[index]?.length &&
+      group.every((component, i) => component === this.brushAtlasComponentGroups[index][i]);
+    const resized = this.brushAtlasCellSize !== this.brushCellSize ||
+      this.brushAtlasPreviewWidth !== this.previewWidth || this.brushAtlasPreviewHeight !== this.previewHeight;
+    const gl = this.gl, size = this.brushCellSize;
+    if (!resized && groups.length === this.brushAtlasComponentGroups.length &&
+      groups.every(sameGroup)) return;
+    if (resized) {
+      this.brushAtlasCells = [];
+      this.componentRasterCache.clear();
+      if (gl && this.resources) {
+        gl.activeTexture(gl.TEXTURE1);
+        gl.bindTexture(gl.TEXTURE_2D, this.resources.brushTexture);
+        this.configureTexture(gl);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8, size * BRUSH_ATLAS_COLUMNS, size * BRUSH_ATLAS_ROWS, 0, gl.RED, gl.UNSIGNED_BYTE, null);
+      }
+    }
+    groups.forEach((group, index) => {
+      if (!group.length || (!resized && sameGroup(group, index))) return;
+      const components = group.filter(c => c.enabled && c.placed !== false).slice(0, MAX_MASK_COMPONENTS);
+      const previous = this.brushAtlasComponentGroups[index]?.filter(c => c.enabled && c.placed !== false);
+      // Brush continuation changes only its new dabs. Changes to the component
+      // order, operation, inversion or strength require recomposing the cell.
+      const sameComposition = !resized && factors[index] === this.brushAtlasFactors[index] && previous?.length === components.length && components.every((c, i) => {
+        const p = previous[i];
+        return c.id === p.id && c.kind === p.kind && c.operation === p.operation && c.inverted === p.inverted && c.opacity === p.opacity;
+      });
+      let dirty: MaskDirtyRect | null = sameComposition ? null : fullMaskRect(size);
+      const maps = components.map((component, componentIndex) => {
+        const raster = this.componentRaster(component, `${index}:${componentIndex}:${component.id}`);
+        dirty = unionMaskRect(dirty, raster.dirty);
+        return raster.pixels;
+      });
+      if (!dirty) return;
+      const bounds: MaskDirtyRect = dirty;
+      const cell = this.brushAtlasCells[index] ?? new Uint8Array(size * size);
+      this.brushAtlasCells[index] = cell;
+      const operations = components.map(c => c.operation === "subtract" ? 1 : c.operation === "intersect" ? 2 : 0);
+      const scales = components.map(c => (c.inverted ? -1 : 1) * c.opacity);
+      const biases = components.map(c => c.inverted ? c.opacity : 0);
+      for (let y = bounds.y0; y < bounds.y1; y++) for (let x = bounds.x0; x < bounds.x1; x++) {
+        const pixel = y * size + x;
+        let weight = factors[index] ? 1 : 0;
+        for (let c = 0; c < components.length; c++) {
+          const value = maps[c][pixel] * scales[c] + biases[c];
+          // Inputs are already normalized; avoid validation in the pixel loop.
+          weight = operations[c] === 1 ? weight * (1 - value)
+            : operations[c] === 2 ? weight * value : 1 - (1 - weight) * (1 - value);
+        }
+        cell[pixel] = Math.round(clamp(weight) * 255);
+      }
+      if (gl && this.resources) {
+        gl.activeTexture(gl.TEXTURE1);
+        gl.bindTexture(gl.TEXTURE_2D, this.resources.brushTexture);
+        gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+        gl.pixelStorei(gl.UNPACK_ROW_LENGTH, size);
+        gl.pixelStorei(gl.UNPACK_SKIP_PIXELS, bounds.x0);
+        gl.pixelStorei(gl.UNPACK_SKIP_ROWS, bounds.y0);
+        gl.texSubImage2D(gl.TEXTURE_2D, 0, (index % BRUSH_ATLAS_COLUMNS) * size + bounds.x0,
+          Math.floor(index / BRUSH_ATLAS_COLUMNS) * size + bounds.y0, bounds.x1 - bounds.x0, bounds.y1 - bounds.y0, gl.RED, gl.UNSIGNED_BYTE, cell);
+        gl.pixelStorei(gl.UNPACK_ROW_LENGTH, 0);
+        gl.pixelStorei(gl.UNPACK_SKIP_PIXELS, 0);
+        gl.pixelStorei(gl.UNPACK_SKIP_ROWS, 0);
+      }
+    });
+    this.brushAtlasComponentGroups = groups;
+    this.brushAtlasFactors = factors;
     this.brushAtlasPreviewWidth = this.previewWidth;
     this.brushAtlasPreviewHeight = this.previewHeight;
-    this.brushAtlasCellSize = this.brushCellSize;
-    const atlas = this.createBrushAtlas(componentGroups);
-    this.brushAtlasCanvas = atlas;
-    if (this.context2d) {
-      const context = atlas.getContext("2d", { willReadFrequently: true });
-      this.brushAtlasPixels =
-        context?.getImageData(0, 0, atlas.width, atlas.height).data ?? null;
-    } else {
-      // WebGL samples the uploaded atlas directly; avoiding a synchronous
-      // multi-megabyte Canvas2D readback makes mask edits substantially faster.
-      this.brushAtlasPixels = null;
+    this.brushAtlasCellSize = size;
+    const activeIds = new Set(groups.flatMap((group, index) => group.filter(c => c.enabled && c.placed !== false)
+      .map((c, componentIndex) => `${index}:${componentIndex}:${c.id}`)));
+    for (const id of this.componentRasterCache.keys()) if (!activeIds.has(id)) this.componentRasterCache.delete(id);
+    // Keep raster memory bounded even for catalogs with many components.
+    while (this.componentRasterCache.size > 16) this.componentRasterCache.delete(this.componentRasterCache.keys().next().value!);
+    const brushes = [...this.componentRasterCache.values()].filter(entry => entry.brush);
+    for (const entry of brushes.slice(0, -2)) entry.brush = undefined;
+  }
+
+  private componentRaster(component: MaskComponent, key: string): { pixels: Float32Array; dirty: MaskDirtyRect | null } {
+    const cached = this.componentRasterCache.get(key);
+    if (cached?.component === component) return { pixels: cached.pixels, dirty: null };
+    this.componentRasterCache.delete(key);
+    if (component.kind === "brush") {
+      const brush = cached?.brush ?? new BrushRasterizer(this.brushCellSize,
+        this.previewWidth / Math.max(1, this.previewHeight), this.brushEdgeWeight());
+      const dirty = brush.update(component.strokes ?? []);
+      this.componentRasterCache.set(key, { component, brush, pixels: brush.pixels });
+      return { pixels: brush.pixels, dirty: cached?.brush ? dirty : fullMaskRect(this.brushCellSize) };
     }
-    if (!this.gl || !this.resources) return;
-    this.gl.activeTexture(this.gl.TEXTURE1);
-    this.gl.bindTexture(this.gl.TEXTURE_2D, this.resources.brushTexture);
-    this.configureTexture(this.gl);
-    this.gl.pixelStorei(this.gl.UNPACK_FLIP_Y_WEBGL, false);
-    this.gl.texImage2D(
-      this.gl.TEXTURE_2D,
-      0,
-      this.gl.RGBA,
-      this.gl.RGBA,
-      this.gl.UNSIGNED_BYTE,
-      atlas,
-    );
+    const pixels = this.rasterizeAnalyticComponent(component);
+    this.componentRasterCache.set(key, { component, pixels });
+    return { pixels, dirty: fullMaskRect(this.brushCellSize) };
+  }
+
+  private brushEdgeWeight() {
+    const targets = new WeakMap<BrushStroke, Rgb>();
+    return (stroke: BrushStroke, x: number, y: number) => {
+      let target = targets.get(stroke);
+      if (!target) { target = this.sampleMaskSourceColor(stroke.points[0].x, stroke.points[0].y); targets.set(stroke, target); }
+      const sample = this.sampleMaskSourceColor(x, y);
+      const distance = Math.hypot(sample[0] - target[0], sample[1] - target[1], sample[2] - target[2]) / Math.sqrt(3);
+      return 1 - smoothstep(0.035, 0.22, distance);
+    };
   }
 
   private cachedMaskComponents(mask: Mask): MaskComponent[] {
@@ -3265,205 +3400,16 @@ export class ImageEngine {
     return components;
   }
 
-  private createBrushAtlas(
-    componentGroups: MaskComponent[][],
-  ): HTMLCanvasElement {
-    const atlas = this.brushAtlasCanvas ?? document.createElement("canvas");
-    const cellSize = this.brushCellSize;
-    const atlasWidth = cellSize * BRUSH_ATLAS_COLUMNS;
-    const atlasHeight = cellSize * BRUSH_ATLAS_ROWS;
-    if (atlas.width !== atlasWidth) atlas.width = atlasWidth;
-    if (atlas.height !== atlasHeight) atlas.height = atlasHeight;
-    const context = atlas.getContext("2d", {
-      willReadFrequently: Boolean(this.context2d),
-    });
-    if (!context) return atlas;
-    context.clearRect(0, 0, atlas.width, atlas.height);
-    componentGroups.forEach((allComponents, index) => {
-      const components = allComponents
-        .filter((component) => component.enabled)
-        .slice(0, MAX_MASK_COMPONENTS);
-      if (!components.length) return;
-      const column = index % BRUSH_ATLAS_COLUMNS;
-      const row = Math.floor(index / BRUSH_ATLAS_COLUMNS);
-      const composed = new Float32Array(cellSize * cellSize);
-      for (const component of components) {
-        const componentMap =
-          component.kind === "brush"
-            ? this.rasterizeBrushComponent(component)
-            : this.rasterizeAnalyticComponent(component);
-        for (let pixel = 0; pixel < composed.length; pixel += 1) {
-          let weight = componentMap[pixel];
-          if (component.inverted) weight = 1 - weight;
-          weight *= normalizedPercent(component.opacity);
-          composed[pixel] = composeMaskWeight(
-            composed[pixel],
-            weight,
-            component.operation,
-          );
-        }
-      }
-      const cell = context.createImageData(cellSize, cellSize);
-      for (let pixel = 0; pixel < composed.length; pixel += 1) {
-        const alpha = Math.round(clamp(composed[pixel]) * 255);
-        const offset = pixel * 4;
-        cell.data[offset] = 255;
-        cell.data[offset + 1] = 255;
-        cell.data[offset + 2] = 255;
-        cell.data[offset + 3] = alpha;
-      }
-      context.putImageData(
-        cell,
-        column * cellSize,
-        row * cellSize,
-      );
-    });
-    return atlas;
-  }
-
-  private rasterizeBrushComponent(component: MaskComponent): Float32Array {
-    const cellSize = this.brushCellSize;
-    const result = new Float32Array(cellSize * cellSize);
-    const paintDensityLimit = new Float32Array(result.length);
-    const eraseBaseline = new Float32Array(result.length);
-    const eraseDensityLimit = new Float32Array(result.length);
-    const canvas = document.createElement("canvas");
-    canvas.width = cellSize;
-    canvas.height = cellSize;
-    const context = canvas.getContext("2d", { willReadFrequently: true });
-    if (!context) return result;
-    const sourceAspect = clamp(
-      this.previewWidth / Math.max(1, this.previewHeight),
-      0.1,
-      10,
-    );
-
-    for (const stroke of component.strokes ?? []) {
-      if (!stroke.points.length) continue;
-      context.clearRect(0, 0, cellSize, cellSize);
-      context.globalCompositeOperation = "source-over";
-      const normalizedDiameter =
-        stroke.size <= 1 ? stroke.size : stroke.size / 100;
-      const baseRadiusY = Math.max(
-        0.5,
-        normalizedDiameter * cellSize * 0.5,
-      );
-      const baseRadiusX = Math.max(0.5, baseRadiusY / sourceAspect);
-      const feather = percentage(stroke.feather);
-      const flow = percentage(stroke.flow);
-
-      const stamp = (point: BrushPoint) => {
-        const pressure = clamp(finite(point.pressure, 1), 0.05, 1);
-        const radiusX = baseRadiusX * (0.35 + pressure * 0.65);
-        const radiusY = baseRadiusY * (0.35 + pressure * 0.65);
-        const centerX = clamp(point.x) * cellSize;
-        const centerY = clamp(point.y) * cellSize;
-        context.save();
-        context.translate(centerX, centerY);
-        context.scale(radiusX, radiusY);
-        const gradient = context.createRadialGradient(0, 0, 0, 0, 0, 1);
-        const solidEdge = clamp(1 - feather, 0, 0.98);
-        gradient.addColorStop(0, `rgba(255,255,255,${flow})`);
-        gradient.addColorStop(
-          solidEdge,
-          `rgba(255,255,255,${flow})`,
-        );
-        gradient.addColorStop(1, "rgba(255,255,255,0)");
-        context.fillStyle = gradient;
-        context.beginPath();
-        context.arc(0, 0, 1, 0, Math.PI * 2);
-        context.fill();
-        context.restore();
-      };
-
-      let previous = stroke.points[0];
-      stamp(previous);
-      for (let pointIndex = 1; pointIndex < stroke.points.length; pointIndex += 1) {
-        const point = stroke.points[pointIndex];
-        const distance = Math.hypot(
-          (point.x - previous.x) * cellSize,
-          (point.y - previous.y) * cellSize,
-        );
-        const spacing = Math.max(1, Math.min(baseRadiusX, baseRadiusY) * 0.28);
-        const steps = Math.max(1, Math.ceil(distance / spacing));
-        for (let step = 1; step <= steps; step += 1) {
-          const amount = step / steps;
-          stamp({
-            x: mix(previous.x, point.x, amount),
-            y: mix(previous.y, point.y, amount),
-            pressure: mix(
-              finite(previous.pressure, 1),
-              finite(point.pressure, 1),
-              amount,
-            ),
-          });
-        }
-        previous = point;
-      }
-
-      const strokePixels = context.getImageData(
-        0,
-        0,
-        cellSize,
-        cellSize,
-      ).data;
-      const density = percentage(stroke.density ?? 100);
-      const target = stroke.autoMask
-        ? this.sampleMaskSourceColor(
-            stroke.points[0].x,
-            stroke.points[0].y,
-          )
-        : null;
-      for (let pixel = 0; pixel < result.length; pixel += 1) {
-        let weight = Math.min(strokePixels[pixel * 4 + 3] / 255, density);
-        if (target && weight > 0) {
-          const x = (pixel % cellSize + 0.5) / cellSize;
-          const y =
-            (Math.floor(pixel / cellSize) + 0.5) / cellSize;
-          const sample = this.sampleMaskSourceColor(x, y);
-          const distance = Math.hypot(
-            sample[0] - target[0],
-            sample[1] - target[1],
-            sample[2] - target[2],
-          ) / Math.sqrt(3);
-          weight *= 1 - smoothstep(0.035, 0.22, distance);
-        }
-        if (weight <= 0) continue;
-        if (stroke.erase) {
-          if (eraseDensityLimit[pixel] <= 0) {
-            eraseBaseline[pixel] = result[pixel];
-          }
-          eraseDensityLimit[pixel] = Math.max(
-            eraseDensityLimit[pixel],
-            density,
-          );
-          const densityFloor =
-            eraseBaseline[pixel] * (1 - eraseDensityLimit[pixel]);
-          result[pixel] = Math.max(
-            densityFloor,
-            result[pixel] * (1 - weight),
-          );
-        } else {
-          paintDensityLimit[pixel] = Math.max(
-            paintDensityLimit[pixel],
-            density,
-          );
-          result[pixel] = Math.min(
-            paintDensityLimit[pixel],
-            1 - (1 - result[pixel]) * (1 - weight),
-          );
-          // A fresh paint pass establishes a new baseline for later erasing.
-          eraseDensityLimit[pixel] = 0;
-          eraseBaseline[pixel] = result[pixel];
-        }
-      }
-    }
-    return result;
-  }
-
   private rasterizeAnalyticComponent(component: MaskComponent): Float32Array {
     const cellSize = this.brushCellSize;
     const result = new Float32Array(cellSize * cellSize);
+    const sampleGradient = gradientSampler(component, this.previewWidth / Math.max(1, this.previewHeight));
+    if (sampleGradient) {
+      for (let y = 0; y < cellSize; y++) for (let x = 0; x < cellSize; x++) {
+        result[y * cellSize + x] = sampleGradient((x + 0.5) / cellSize, (y + 0.5) / cellSize);
+      }
+      return result;
+    }
     const evaluation: ComponentEvaluationContext = {};
     if (component.kind === "object" && component.object) {
       evaluation.objectTarget = this.sampleMaskSourceColor(
@@ -3497,34 +3443,8 @@ export class ImageEngine {
     y: number,
     evaluation: ComponentEvaluationContext = {},
   ): number {
-    if (component.kind === "linear" && component.linear) {
-      const directionX =
-        (component.linear.x2 - component.linear.x1) * this.previewWidth;
-      const directionY =
-        (component.linear.y2 - component.linear.y1) * this.previewHeight;
-      const lengthSquared =
-        directionX * directionX + directionY * directionY;
-      if (lengthSquared < 1e-4) return 0;
-      const amount =
-        (((x - component.linear.x1) * this.previewWidth) * directionX +
-          ((y - component.linear.y1) * this.previewHeight) * directionY) /
-        lengthSquared;
-      return 1 - smoothstep(0, 1, amount);
-    }
-    if (component.kind === "radial" && component.radial) {
-      const angle = (finite(component.radial.rotation) * Math.PI) / 180;
-      const cosine = Math.cos(angle);
-      const sine = Math.sin(angle);
-      const pointX = x - component.radial.cx;
-      const pointY = y - component.radial.cy;
-      const rotatedX = cosine * pointX + sine * pointY;
-      const rotatedY = -sine * pointX + cosine * pointY;
-      const radius = Math.hypot(
-        rotatedX / Math.max(0.0001, component.radial.rx),
-        rotatedY / Math.max(0.0001, component.radial.ry),
-      );
-      const feather = Math.max(0.001, percentage(component.radial.feather));
-      return 1 - smoothstep(Math.max(0, 1 - feather), 1, radius);
+    if (component.kind === "linear" || component.kind === "radial") {
+      return gradientWeight(component, x, y, this.previewWidth / Math.max(1, this.previewHeight));
     }
     const color = this.sampleMaskSourceColor(x, y);
     const lightness = luminance(color);
@@ -3980,6 +3900,11 @@ export class ImageEngine {
     const masks = state.masks
       .filter((mask) => mask.enabled)
       .slice(0, MAX_MASKS);
+    const preparedLocals = masks.map(mask => {
+      const amount = clamp(finite(mask.amount, 100) / 100, 0, 2);
+      return Object.fromEntries(Object.entries(mask.adjustments).map(([key, value]) => [key, value * amount])) as unknown as LocalAdjustments;
+    });
+    const preparedLocalCurves = masks.map(mask => mask.curve && !isIdentityToneCurve(mask.curve) ? sanitizeCurve(mask.curve) : null);
     const curves: CpuCurves = {
       tone: sanitizeCurve(state.curve),
       channels: [
@@ -4103,7 +4028,7 @@ export class ImageEngine {
               maskReferenceColor,
             );
             if (weight > 0) {
-              const locallyAdjusted = this.applyLocalCpu(color, blurred, mask.adjustments);
+              const locallyAdjusted = this.applyLocalCpu(color, blurred, preparedLocals[index], mask, mapped.x, mapped.y, preparedLocalCurves[index]);
               color = color.map((channel, channelIndex) =>
                 mix(channel, locallyAdjusted[channelIndex], weight),
               ) as Rgb;
@@ -4198,7 +4123,12 @@ export class ImageEngine {
     color: Rgb,
     blurred: Rgb,
     local: LocalAdjustments,
+    mask?: Mask,
+    x = 0,
+    y = 0,
+    curve: ToneCurvePoint[] | null = null,
   ): Rgb {
+    const amount = clamp(finite(mask?.amount, 100) / 100, 0, 2);
     let adjusted = applyBasicTone(color, blurred, {
       exposure: local.exposure,
       contrast: local.contrast,
@@ -4249,6 +4179,14 @@ export class ImageEngine {
       adjusted = adjusted.map((channel) =>
         mix(channel, neutral, purple * defringe * 0.72),
       ) as Rgb;
+    }
+    if (curve) adjusted = adjusted.map(channel => mix(channel, evaluateCurve(channel, curve), amount)) as Rgb;
+    if (mask?.grain?.amount) {
+      const g = mask.grain;
+      const cellX = Math.floor(x * this.previewWidth / this.previewHeight * 1200 / (1 + g.size * 0.09));
+      const cellY = Math.floor(y * 1200 / (1 + g.size * 0.09));
+      const noise = ((cellX * 73 + cellY * 151 + cellX * cellY * 3) % 997) / 997 - 0.5;
+      adjusted = adjusted.map(channel => channel + noise * g.amount / 100 * amount * (0.08 + g.roughness / 100 * 0.16)) as Rgb;
     }
     return adjusted.map((channel) => clamp(channel)) as Rgb;
   }
@@ -4331,16 +4269,23 @@ export class ImageEngine {
     y: number,
     _color: Rgb,
   ): number {
-    let value = this.sampleBrushAtlas(maskIndex, x, y);
+    const components = this.cachedMaskComponents(mask);
+    if (!components.some(c => c.placed !== false)) return 0;
+    const component = this.directGradient(components);
+    let value = component ? gradientWeight(component, x, y, this.previewWidth / Math.max(1, this.previewHeight)) : this.sampleBrushAtlas(maskIndex, x, y);
+    if (component) {
+      if (component.inverted) value = 1 - value;
+      value *= component.opacity;
+      if (components.filter(c => c.enabled && c.placed !== false).length > 1) value *= this.sampleBrushAtlas(maskIndex, x, y);
+    }
     if (mask.inverted) value = 1 - value;
     return clamp(value * normalizedPercent(mask.opacity));
   }
 
   private sampleBrushAtlas(index: number, x: number, y: number): number {
-    if (!this.brushAtlasPixels || !this.brushAtlasCanvas) return 0;
+    const pixels = this.brushAtlasCells[index];
+    if (!pixels) return 0;
     const cellSize = this.brushCellSize;
-    const column = index % BRUSH_ATLAS_COLUMNS;
-    const row = Math.floor(index / BRUSH_ATLAS_COLUMNS);
     const sampleX = clamp(x) * cellSize - 0.5;
     const sampleY = clamp(y) * cellSize - 0.5;
     const x0 = Math.max(0, Math.min(cellSize - 1, Math.floor(sampleX)));
@@ -4349,15 +4294,10 @@ export class ImageEngine {
     const y1 = Math.min(cellSize - 1, y0 + 1);
     const amountX = clamp(sampleX - x0);
     const amountY = clamp(sampleY - y0);
-    const atlasWidth = this.brushAtlasCanvas.width;
-    const atlasX0 = column * cellSize + x0;
-    const atlasX1 = column * cellSize + x1;
-    const atlasY0 = row * cellSize + y0;
-    const atlasY1 = row * cellSize + y1;
-    const topLeft = this.brushAtlasPixels[(atlasY0 * atlasWidth + atlasX0) * 4 + 3] / 255;
-    const topRight = this.brushAtlasPixels[(atlasY0 * atlasWidth + atlasX1) * 4 + 3] / 255;
-    const bottomLeft = this.brushAtlasPixels[(atlasY1 * atlasWidth + atlasX0) * 4 + 3] / 255;
-    const bottomRight = this.brushAtlasPixels[(atlasY1 * atlasWidth + atlasX1) * 4 + 3] / 255;
+    const topLeft = pixels[y0 * cellSize + x0] / 255;
+    const topRight = pixels[y0 * cellSize + x1] / 255;
+    const bottomLeft = pixels[y1 * cellSize + x0] / 255;
+    const bottomRight = pixels[y1 * cellSize + x1] / 255;
     const top = mix(topLeft, topRight, amountX);
     const bottom = mix(bottomLeft, bottomRight, amountX);
     return mix(top, bottom, amountY);
