@@ -271,6 +271,8 @@ export interface MaskPayload {
 }
 
 export interface MaskComponent extends MaskPayload {
+  /** False only while a newly created gradient is waiting for its first drag. */
+  placed?: boolean;
   id: string;
   name: string;
   kind: MaskKind;
@@ -281,6 +283,9 @@ export interface MaskComponent extends MaskPayload {
 }
 
 export interface Mask extends MaskPayload {
+  amount?: number;
+  grain?: { amount: number; size: number; roughness: number };
+  curve?: ToneCurvePoint[];
   id: string;
   name: string;
   kind: MaskKind;

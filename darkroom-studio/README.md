@@ -56,12 +56,15 @@ installation is intended for a dedicated HTTPS deployment origin or subpath.
   placement, bokeh selection, and RGB primary calibration
 - Geometry, rotation, crop presets, draggable crop frame, and ratio locking
 - Eight composable mask groups with up to 32 components each. Components include
-  Brush, Linear/Radial Gradient, Luminance/Color/estimated Depth Range, and
-  local Subject, Sky, Background, Object, People, and Landscape estimates
+  Brush, Linear Gradient, Radial Gradient, Luminance Range, and Color Range
 - Add, Subtract, and Intersect composition; group/component inversion, opacity,
   enable/delete, rename, duplicate, duplicate-and-invert, five overlay modes,
-  brush pressure/flow/density/Auto Mask, on-image color/luminance sampling,
-  object-region drawing, and full local tone/color/presence adjustments
+  brush pressure/flow/density and edge-aware color selection, on-image
+  color/luminance sampling, and local tone/color/presence/detail adjustments
+- Live mask previews while drawing; gradient movement, resizing, rotation,
+  off-image placement, feather handles, Shift constraints, exact numeric values,
+  0–200% adjustment amount, local point curves, and local grain controls
+- Manual Heal and Clone tools; no AI selection or generative removal controls
 - Clone/heal spots with size, feather, opacity, draggable source markers,
   per-spot deletion, and a sixteen-spot preview limit
 - Histogram, clipping indicator, before/original preview, zoom, presets,
@@ -91,9 +94,9 @@ browser supports them. Camera RAW files are demosaiced locally in a background
 LibRaw worker to an 8-bit sRGB working image; the original RAW bytes are kept
 unchanged. Files over 48 MB use LibRaw's half-size mode to keep peak browser
 memory bounded. RAW support therefore does not claim a native 16-bit linear
-pipeline. Semantic and depth selections are explicitly labelled local estimates;
-they are deterministic offline heuristics, not proprietary cloud/ML models.
-Heal is a luminance-matched clone
+pipeline. Older catalogs containing semantic/depth estimates retain their saved
+rendering for compatibility, but these tools can no longer be created. There is
+no connected AI service. Heal is a luminance-matched clone
 approximation. Browser encoders do not preserve EXIF reliably, and very large
 exports are bounded by the GPU's texture/viewport limit. Imports are capped at
 256 MB per file to avoid exhausting a browser tab.
@@ -122,3 +125,51 @@ research and source list.
 npm test
 npm run build
 ```
+
+## Manual masking workflow
+
+Choose **Mask → Add New Mask → Brush, Linear Gradient, or Radial Gradient**.
+A new gradient waits for your first drag. Linear gradients fade from full strength
+at the start to zero at the end. Move the center pin, drag an outer guide to
+change transition width, or use the rotation handle. Radial gradients expose
+center, edge, rotation, and feather handles; their proportions remain correct
+on rectangular photos. Both gradient types can extend beyond the photograph.
+
+Use **Add**, **Subtract**, or **Intersect** to combine components in one mask.
+Each group shares its local adjustments. **Amount** scales the adjustment recipe
+from 0–200%; group/component opacity controls selection coverage. Click a slider's
+number to enter an exact value, or double-click the slider to reset it. The local
+curve and grain controls affect only the combined mask. Brush settings affect
+new strokes; Flow builds coverage across strokes and Density limits paint strength.
+
+**O** toggles the overlay; **[ / ]** changes brush size; **Shift [ / ]** changes
+feather; **X** switches paint/erase; **Alt/Option** temporarily erases. **Shift**
+constrains new gradients and radial resizing. **Escape** cancels the active
+gesture, and Undo restores a complete stroke or gradient edit. Adjusting the
+local effect hides the overlay so you can judge the photograph.
+
+Behavior references: [TK North's masking walkthrough](https://www.youtube.com/watch?v=xsFMwnSBukU)
+and [Adobe's manual masking documentation](https://helpx.adobe.com/lightroom-classic/help/masking.html).
+This implementation follows those manual workflows; it does not claim pixel-identical
+Adobe processing or complete Lightroom feature parity.
+
+For real-browser renderer checks, run the dev server and open
+`/tests/masking.html`. The page renders synthetic images through WebGL and forced
+Canvas2D, checks gradient falloff, mask combinations, inversion, amount, local
+curves, and PNG export, and reports every assertion in the page. It does not read
+or modify the photo catalog and is excluded from the production build.
+
+For repeatable performance measurements, open `/tests/performance.html`. It
+exercises a 1200 × 800 preview with 24 saved brush strokes (80 points each),
+growing paint/subtract strokes, compound gradient movement, radial rotation,
+and exposure changes. The page reports warm median and p95 render times,
+including recipe updates, texture uploads, and GPU completion. These are renderer
+measurements, not end-to-end input latency; results depend on the device/browser.
+
+Brush rendering retains coverage and processes only newly added dabs. Dirty
+regions update single-channel mask textures without rebuilding other masks.
+Standalone gradients and base gradients refined with Subtract/Intersect use
+direct GPU geometry. Raster caches are bounded; undo, recipe replacement, image
+loading, and graphics-context restoration invalidate the affected cache. Preview
+revision tokens share immutable subtrees so local sliders do not serialize old
+brush strokes on every frame.

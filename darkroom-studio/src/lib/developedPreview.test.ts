@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createDefaultEditState } from "../defaults";
+import { normalizeMask, updateMaskComponent } from "./maskMath";
 import {
   developedPreviewDimensions,
   editRevision,
@@ -45,6 +46,21 @@ describe("editRevision", () => {
     expect(adjusted.masks).toBe(baseline.masks);
     expect(editRevision(adjusted)).not.toBe(editRevision(baseline));
     expect(editRevision(adjusted)).toBe(editRevision(structuredClone(adjusted)));
+  });
+
+  it("tracks local sliders and growing strokes while sharing immutable brush history", () => {
+    const baseline = createDefaultEditState();
+    const mask = normalizeMask({id: 'paint', kind: 'brush', strokes: [{size: 10, flow: 50, feather: 80, points: [{x: 0.2, y: 0.5}]}]});
+    baseline.masks = [mask];
+    const original = editRevision(baseline);
+    const local = {...baseline, masks: [{...mask, adjustments: {...mask.adjustments, exposure: 1}}]};
+    expect(editRevision(local)).not.toBe(original);
+    expect(editRevision(local)).toBe(editRevision(structuredClone(local)));
+    const component = mask.components![0];
+    const grown = {...baseline, masks: [updateMaskComponent(mask, component.id, {strokes: [...component.strokes!, {...component.strokes![0], points: [{x: 0.9, y: 0.6}]}]})]};
+    expect(editRevision(grown)).not.toBe(original);
+    expect(editRevision(grown)).toBe(editRevision(structuredClone(grown)));
+    expect(editRevision(baseline)).toBe(original);
   });
 });
 

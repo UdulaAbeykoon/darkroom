@@ -43,8 +43,8 @@ export default function CurveEditor({
   const pointerToPoint = (clientX: number, clientY: number) => {
     const rect = svgRef.current!.getBoundingClientRect();
     return {
-      x: clamp((clientX - rect.left - PADDING) / (rect.width - PADDING * 2), 0, 1),
-      y: clamp(1 - (clientY - rect.top - PADDING) / (rect.height - PADDING * 2), 0, 1),
+      x: clamp(((clientX - rect.left) / rect.width * WIDTH - PADDING) / (WIDTH - PADDING * 2), 0, 1),
+      y: clamp(1 - ((clientY - rect.top) / rect.height * HEIGHT - PADDING) / (HEIGHT - PADDING * 2), 0, 1),
     };
   };
 
@@ -119,7 +119,7 @@ export default function CurveEditor({
             (closest, point) => Math.min(closest, Math.hypot(point.x - next.x, point.y - next.y)),
             Number.POSITIVE_INFINITY,
           );
-          if (distance < 0.04) return;
+          if (distance < 0.04 || sorted.length >= 16) return;
           onBegin();
           onChange([...sorted, next].sort((a, b) => a.x - b.x));
           onCommit();

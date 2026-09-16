@@ -221,7 +221,7 @@ describe("normalization and import validation", () => {
     });
     expect(normalized.components?.[0].strokes).toEqual([
       {
-        points: [{ x: 0, y: 1, pressure: 1 }],
+        points: [{ x: -1, y: 4, pressure: 1 }],
         size: 100,
         feather: 0,
         flow: 100,
@@ -324,10 +324,10 @@ describe("normalization and import validation", () => {
       },
     });
     expect(radial.radial).toEqual({
-      cx: 0,
-      cy: 1,
+      cx: -1,
+      cy: 2,
       rx: 0.001,
-      ry: 2,
+      ry: 5,
       rotation: -180,
       feather: 100,
     });
@@ -408,6 +408,25 @@ describe("soft mask composition", () => {
 });
 
 describe("component updates and duplication", () => {
+  it("keeps unchanged components and saved strokes shared across brush updates", () => {
+    const mask = normalizeMask(legacyMask());
+    const component = mask.components![0];
+    const other = makeMaskComponent('radial');
+    mask.components = [component, other];
+    const before = getMaskComponents(mask);
+    const updated = updateMaskComponent(mask, component.id, {strokes:[...component.strokes!, {...component.strokes![0], size:12}]});
+    const after = getMaskComponents(updated);
+    expect(after[1]).toBe(before[1]);
+    expect(after[0].strokes![0]).toBe(before[0].strokes![0]);
+    expect(getMaskComponents(updated)).toBe(after);
+  });
+
+  it("keeps fallback IDs scoped to the parent when importing unnamed components", () => {
+    const components = [{kind:'brush'}];
+    expect(getMaskComponents({id:'first',components})[0].id).toBe('first-component-1');
+    expect(getMaskComponents({id:'second',components})[0].id).toBe('second-component-1');
+  });
+
   it("immutably updates and revalidates a selected component", () => {
     const mask = normalizeMask(legacyMask({ inverted: false, opacity: 1 }));
     const originalComponent = mask.components![0];

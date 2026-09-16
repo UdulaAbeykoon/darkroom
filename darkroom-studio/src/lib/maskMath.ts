@@ -56,7 +56,7 @@ const LOCAL_ADJUSTMENT_RANGES: Record<
   keyof LocalAdjustments,
   readonly [number, number]
 > = {
-  exposure: [-4, 4],
+  exposure: [-5, 5],
   contrast: [-100, 100],
   highlights: [-100, 100],
   shadows: [-100, 100],
@@ -181,8 +181,8 @@ const normalizePoint = (value: unknown): BrushPoint | null => {
     return null;
   }
   const point: BrushPoint = {
-    x: clamp(value.x),
-    y: clamp(value.y),
+    x: clamp(value.x, -4, 5),
+    y: clamp(value.y, -4, 5),
   };
   if (typeof value.pressure === "number" && Number.isFinite(value.pressure)) {
     point.pressure = clamp(value.pressure);
@@ -190,8 +190,16 @@ const normalizePoint = (value: unknown): BrushPoint | null => {
   return point;
 };
 
+// Edit recipes are immutable. Keep saved strokes shared while a live stroke
+// grows, instead of cloning the entire painting on every pointer frame.
+const normalizedStrokeCache = new WeakMap<object, BrushStroke>();
+const normalizedComponentCache = new WeakMap<object, MaskComponent>();
+const componentListCache = new WeakMap<object, MaskComponent[]>();
+
 const normalizeStroke = (value: unknown): BrushStroke | null => {
   if (!isRecord(value)) return null;
+  const cached = normalizedStrokeCache.get(value);
+  if (cached) return cached;
   const points = Array.isArray(value.points)
     ? value.points
         .slice(0, MAX_POINTS_PER_STROKE)
@@ -199,7 +207,7 @@ const normalizeStroke = (value: unknown): BrushStroke | null => {
         .filter((point): point is BrushPoint => point !== null)
     : [];
   if (points.length === 0) return null;
-  return {
+  const stroke: BrushStroke = {
     points,
     size: bounded(value.size, 34, 0.1, 100),
     feather: bounded(value.feather, 65, 0, 100),
@@ -208,6 +216,9 @@ const normalizeStroke = (value: unknown): BrushStroke | null => {
     density: bounded(value.density, 100, 0, 100),
     autoMask: cleanBoolean(value.autoMask, false),
   };
+  normalizedStrokeCache.set(value, stroke);
+  normalizedStrokeCache.set(stroke, stroke);
+  return stroke;
 };
 
 const normalizeRange = (
@@ -338,10 +349,10 @@ const normalizePayload = (kind: MaskKind, input: UnknownRecord): MaskPayload => 
       const value = isRecord(input.linear) ? input.linear : {};
       return {
         linear: {
-          x1: bounded(value.x1, 0.5, 0, 1),
-          y1: bounded(value.y1, 0.12, 0, 1),
-          x2: bounded(value.x2, 0.5, 0, 1),
-          y2: bounded(value.y2, 0.72, 0, 1),
+          x1: bounded(value.x1, 0.5, -4, 5),
+          y1: bounded(value.y1, 0.12, -4, 5),
+          x2: bounded(value.x2, 0.5, -4, 5),
+          y2: bounded(value.y2, 0.72, -4, 5),
         },
       };
     }
@@ -349,10 +360,10 @@ const normalizePayload = (kind: MaskKind, input: UnknownRecord): MaskPayload => 
       const value = isRecord(input.radial) ? input.radial : {};
       return {
         radial: {
-          cx: bounded(value.cx, 0.5, 0, 1),
-          cy: bounded(value.cy, 0.5, 0, 1),
-          rx: bounded(value.rx, 0.28, 0.001, 2),
-          ry: bounded(value.ry, 0.34, 0.001, 2),
+          cx: bounded(value.cx, 0.5, -4, 5),
+          cy: bounded(value.cy, 0.5, -4, 5),
+          rx: bounded(value.rx, 0.28, 0.001, 5),
+          ry: bounded(value.ry, 0.34, 0.001, 5),
           rotation: normalizeRotation(value.rotation),
           feather: bounded(value.feather, 55, 0, 100),
         },
@@ -487,6 +498,7 @@ export function makeMaskComponent(
     enabled: true,
     inverted: false,
     opacity: 1,
+    placed: kind !== "linear" && kind !== "radial",
     ...defaultPayload(kind),
   };
 }
@@ -515,6 +527,7 @@ export function normalizeMaskComponent(
     enabled: cleanBoolean(input.enabled, fallback.enabled ?? true),
     inverted: cleanBoolean(input.inverted, fallback.inverted ?? false),
     opacity: bounded(input.opacity, fallback.opacity ?? 1, 0, 1),
+    placed: cleanBoolean(input.placed, true),
     ...normalizePayload(kind, input),
   };
 }
@@ -528,17 +541,26 @@ export function getMaskComponents(mask: Mask | unknown): MaskComponent[] {
   const input = isRecord(mask) ? mask : {};
   const parentId = cleanString(input.id, "mask");
   if (Array.isArray(input.components)) {
-    return input.components
+    const stableIds = input.components.every(component => isRecord(component) && typeof component.id === "string" && typeof component.name === "string");
+    const cached = stableIds && componentListCache.get(input.components);
+    if (cached) return cached;
+    const components = input.components
       .slice(0, MAX_COMPONENTS_PER_MASK)
       .map((component, index) => {
-        const normalized = normalizeMaskComponent(component, {
+        const cacheable = isRecord(component) && typeof component.id === "string" && typeof component.name === "string";
+        const normalized = (cacheable && normalizedComponentCache.get(component)) || normalizeMaskComponent(component, {
           id: `${parentId}-component-${index + 1}`,
           name: `Component ${index + 1}`,
         });
+        if (cacheable) normalizedComponentCache.set(component, normalized);
+        normalizedComponentCache.set(normalized, normalized);
         return index === 0 && normalized.operation !== "add"
-          ? { ...normalized, operation: "add" }
+          ? { ...normalized, operation: "add" as const }
           : normalized;
       });
+    if (stableIds) componentListCache.set(input.components, components);
+    componentListCache.set(components, components);
+    return components;
   }
 
   const kind = isMaskKind(input.kind) ? input.kind : "brush";
@@ -579,6 +601,13 @@ export function normalizeMask(value: unknown, index = 0): Mask {
     inverted: cleanBoolean(input.inverted, false),
     opacity: bounded(input.opacity, 1, 0, 1),
     overlayColor: normalizeOverlayColor(input.overlayColor),
+    amount: bounded(input.amount, 100, 0, 200),
+    grain: {
+      amount: bounded(isRecord(input.grain) ? input.grain.amount : undefined, 0, 0, 100),
+      size: bounded(isRecord(input.grain) ? input.grain.size : undefined, 25, 1, 100),
+      roughness: bounded(isRecord(input.grain) ? input.grain.roughness : undefined, 50, 0, 100),
+    },
+    curve: normalizeLocalCurve(input.curve),
     adjustments: normalizeAdjustments(input.adjustments),
     ...representativePayload,
     components,
@@ -630,14 +659,14 @@ export function updateMaskComponent(
     | Partial<MaskComponent>
     | ((component: MaskComponent) => Partial<MaskComponent>),
 ): Mask {
-  const normalized = normalizeMask(mask);
+  const normalized = Array.isArray(mask.components) ? mask : normalizeMask(mask);
   let updated = false;
-  const components = normalized.components!.map((component) => {
+  const components = getMaskComponents(normalized).map((component) => {
     if (component.id !== componentId) return component;
     updated = true;
     const nextPatch = typeof patch === "function" ? patch(component) : patch;
     return normalizeMaskComponent(
-      { ...component, ...nextPatch },
+      { ...component, ...nextPatch, ...(nextPatch.linear || nextPatch.radial ? { placed: true } : {}) },
       component,
     );
   });
@@ -657,7 +686,7 @@ export function duplicateMaskComponent(
 ): MaskComponent {
   return normalizeMaskComponent(
     {
-      ...component,
+      ...structuredClone(component),
       ...overrides,
       id: overrides.id ?? nextId("mask-component"),
       name: overrides.name ?? `${component.name} Copy`,
@@ -683,4 +712,11 @@ export function duplicateMaskComponentInMask(
   const components = [...normalized.components!];
   components.splice(sourceIndex + 1, 0, copy);
   return { ...normalized, components };
+}
+
+export function normalizeLocalCurve(value: unknown): import("../types").ToneCurvePoint[] {
+  const points = Array.isArray(value) ? value.filter(isRecord).filter(p => Number.isFinite(p.x) && Number.isFinite(p.y)).slice(0, 4096).map(p => ({ x: clamp(p.x as number), y: clamp(p.y as number) })).sort((a, b) => a.x - b.x) : [];
+  const unique = points.filter((p, i) => i === 0 || p.x > points[i - 1].x);
+  if (unique.length > 16) return Array.from({ length: 16 }, (_, i) => unique[Math.round(i * (unique.length - 1) / 15)]);
+  return unique.length >= 2 ? unique : [{ x: 0, y: 0 }, { x: 1, y: 1 }];
 }

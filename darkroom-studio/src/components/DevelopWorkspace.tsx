@@ -16,6 +16,7 @@ import {
   useState,
 } from "react";
 import { ImageEngine, type RenderOptions } from "../lib/imageEngine";
+import { constrainGradientPoint, radialLocalPoint, radialPoint, linearMetrics, linearFromCenter } from "../lib/maskGeometry";
 import { getMaskComponents } from "../lib/maskMath";
 import { renderBlobForPhoto } from "../lib/rawImage";
 import type {
@@ -94,6 +95,7 @@ type DraftGesture =
       maskId: string;
       componentId: string;
       points: BrushPoint[];
+      settings: MaskBrushSettings;
       erase: boolean;
     }
   | {
@@ -114,13 +116,7 @@ type DraftGesture =
     }
   | {
       type: "radial";
-      maskId: string;
-      componentId: string;
-      start: { x: number; y: number };
-      current: { x: number; y: number };
-    }
-  | {
-      type: "object";
+      feather: number;
       maskId: string;
       componentId: string;
       start: { x: number; y: number };
@@ -128,7 +124,7 @@ type DraftGesture =
     }
   | {
       type: "linear-control";
-      action: "start" | "end" | "feather";
+      action: "start" | "end" | "feather" | "rotate" | "start-guide" | "end-guide";
       maskId: string;
       componentId: string;
       pointerStart: { x: number; y: number };
@@ -510,11 +506,20 @@ export default function DevelopWorkspace(props: Props) {
     () => (activeMaskGroup ? getMaskComponents(activeMaskGroup) : []),
     [activeMaskGroup],
   );
-  const activeMask = activeMaskGroup
+  const storedActiveMask = activeMaskGroup
     ? activeMaskComponents.find(
         (component) => component.id === activeMaskComponentId,
       ) ?? activeMaskComponents[0] ?? null
     : null;
+
+  const sourceAspect = Math.max(1, photo.width) / Math.max(1, photo.height);
+  const draftMaskPatch = useMemo<Partial<MaskComponent> | null>(() => {
+    if (gesture?.type === "brush") return { strokes: [...(storedActiveMask?.strokes ?? []), { ...gesture.settings, points: gesture.points, erase: gesture.erase }] };
+    if (gesture?.type === "linear") return { placed: true, linear: { x1: gesture.start.x, y1: gesture.start.y, x2: gesture.current.x, y2: gesture.current.y } };
+    if (gesture?.type === "radial") return { placed: true, radial: { cx: gesture.start.x, cy: gesture.start.y, rx: Math.max(0.001, Math.abs(gesture.current.x - gesture.start.x)), ry: Math.max(0.001, Math.abs(gesture.current.y - gesture.start.y)), rotation: 0, feather: gesture.feather } };
+    return null;
+  }, [gesture, storedActiveMask]);
+  const activeMask = storedActiveMask && draftMaskPatch ? { ...storedActiveMask, ...draftMaskPatch } : storedActiveMask;
 
   const setDraftGesture = (next: DraftGesture | null) => {
     if (gestureFrameRef.current !== null) {
@@ -653,14 +658,27 @@ export default function DevelopWorkspace(props: Props) {
 
   useEffect(() => {
     const down = (event: KeyboardEvent) => {
-      if (event.code === "Space" && !event.repeat) setSpacePressed(true);
+      if (event.key === "Escape" && gestureRef.current) {
+        const current = gestureRef.current;
+        if (current.type === "linear-control" || current.type === "radial-control") {
+          if (maskUpdateFrameRef.current !== null) cancelAnimationFrame(maskUpdateFrameRef.current);
+          maskUpdateFrameRef.current = null; pendingMaskUpdateRef.current = null;
+          propsRef.current.onUpdateMaskComponent(current.maskId, current.componentId, current.type === "linear-control" ? { linear: current.linear } : { radial: current.radial });
+          if (current.started) propsRef.current.onCommitEdit();
+        }
+        setDraftGesture(null);
+      }
+      if (event.code === "Space" && !event.repeat && !(event.target as HTMLElement)?.closest("input, textarea, select")) setSpacePressed(true);
     };
     const up = (event: KeyboardEvent) => {
       if (event.code === "Space") setSpacePressed(false);
     };
+    const blur = () => { setSpacePressed(false); setPointerPreviewNow(null); };
+    window.addEventListener("blur", blur);
     window.addEventListener("keydown", down);
     window.addEventListener("keyup", up);
     return () => {
+      window.removeEventListener("blur", blur);
       window.removeEventListener("keydown", down);
       window.removeEventListener("keyup", up);
     };
@@ -691,8 +709,12 @@ export default function DevelopWorkspace(props: Props) {
               height: 1,
             },
           }
-        : photo.edits,
-    [photo.edits, tool],
+        : draftMaskPatch && activeMaskGroup && storedActiveMask
+          ? { ...photo.edits, masks: photo.edits.masks.map(mask => mask.id === activeMaskGroup.id
+              ? { ...mask, components: activeMaskComponents.map(component => component.id === storedActiveMask.id ? { ...component, ...draftMaskPatch } : component) }
+              : mask) }
+          : photo.edits,
+    [photo.edits, tool, draftMaskPatch, activeMaskGroup, storedActiveMask, activeMaskComponents],
   );
   const previewOptions = useMemo<RenderOptions>(
     () => ({
@@ -953,11 +975,19 @@ export default function DevelopWorkspace(props: Props) {
       histogramTimerRef.current = null;
     }
     if (!loaded) return;
-    scheduleRender();
-  }, [loaded, previewOptions, previewState, scheduleRender]);
+    if (draftMaskPatch) {
+      // Draft pointer samples are already coalesced to animation frames. Paint
+      // in this commit so the brush does not wait for a second frame.
+      if (renderFrameRef.current !== null) {
+        cancelAnimationFrame(renderFrameRef.current);
+        renderFrameRef.current = null;
+      }
+      renderNow();
+    } else scheduleRender();
+  }, [loaded, previewOptions, previewState, draftMaskPatch, renderNow, scheduleRender]);
 
   const imagePoint = (event: React.PointerEvent) =>
-    engineRef.current?.clientToImage(event.clientX, event.clientY) ?? {
+    engineRef.current?.clientToImage(event.clientX, event.clientY, tool === "mask") ?? {
       x: 0,
       y: 0,
       inside: false,
@@ -977,9 +1007,10 @@ export default function DevelopWorkspace(props: Props) {
       });
       return;
     }
+    if (event.button !== 0 || showOriginal || !loaded) return;
     if (tool === "crop") return;
     const point = imagePoint(event);
-    if (!point.inside) return;
+    if (!point.inside && !(tool === "mask" && (activeMask?.kind === "linear" || activeMask?.kind === "radial"))) return;
 
     if (props.guidedUprightActive && tool === "edit") {
       if (props.uprightGuides.length >= 4) {
@@ -1054,6 +1085,7 @@ export default function DevelopWorkspace(props: Props) {
           y: point.y,
           pressure: event.pointerType === "pen" ? event.pressure || 1 : 1,
         }],
+        settings: { ...props.maskBrushSettings },
         erase: event.altKey || props.maskBrushSettings.erase,
       });
     } else if (activeMask.kind === "linear") {
@@ -1067,14 +1099,7 @@ export default function DevelopWorkspace(props: Props) {
     } else if (activeMask.kind === "radial") {
       setDraftGesture({
         type: "radial",
-        maskId: activeMaskGroup.id,
-        componentId: activeMask.id,
-        start: { x: point.x, y: point.y },
-        current: { x: point.x, y: point.y },
-      });
-    } else if (activeMask.kind === "object") {
-      setDraftGesture({
-        type: "object",
+        feather: activeMask.radial?.feather ?? 55,
         maskId: activeMaskGroup.id,
         componentId: activeMask.id,
         start: { x: point.x, y: point.y },
@@ -1113,7 +1138,7 @@ export default function DevelopWorkspace(props: Props) {
       return;
     }
     const point = hoveredPoint;
-    if (!point.inside && (current.type === "brush" || current.type === "heal")) return;
+    if (!point.inside && current.type === "heal") return;
     if (current.type === "brush" || current.type === "heal") {
       const coalescedEvents = event.nativeEvent.getCoalescedEvents?.();
       const nativeEvents = coalescedEvents?.length
@@ -1125,8 +1150,9 @@ export default function DevelopWorkspace(props: Props) {
           engineRef.current?.clientToImage(
             nativeEvent.clientX,
             nativeEvent.clientY,
+            current.type === "brush",
           ) ?? point;
-        if (!mapped.inside) continue;
+        if (!mapped.inside && current.type !== "brush") continue;
         const nextPoint = {
           x: mapped.x,
           y: mapped.y,
@@ -1145,12 +1171,16 @@ export default function DevelopWorkspace(props: Props) {
     } else {
       queueDraftGesture({
         ...current,
-        current: { x: point.x, y: point.y },
+        current: event.shiftKey && (current.type === "linear" || current.type === "radial")
+          ? constrainGradientPoint(current.start, point, current.type, sourceAspect)
+          : { x: point.x, y: point.y },
       });
     }
   };
 
   const endPointerGesture = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (event.type === "pointercancel") { setDraftGesture(null); return; }
+    if (event.type === "pointerup") movePointerGesture(event);
     const current = gestureRef.current;
     if (
       !current ||
@@ -1204,11 +1234,7 @@ export default function DevelopWorkspace(props: Props) {
     } else if (current.type === "brush" && current.points.length) {
       props.onAppendBrushStroke(current.maskId, {
         points: current.points,
-        size: props.maskBrushSettings.size,
-        feather: props.maskBrushSettings.feather,
-        flow: props.maskBrushSettings.flow,
-        density: props.maskBrushSettings.density,
-        autoMask: props.maskBrushSettings.autoMask,
+        ...current.settings,
         erase: current.erase,
       });
     } else if (current.type === "linear") {
@@ -1244,35 +1270,11 @@ export default function DevelopWorkspace(props: Props) {
         radial: {
           cx: current.start.x,
           cy: current.start.y,
-          rx: Math.max(0.02, Math.abs(current.current.x - current.start.x)),
-          ry: Math.max(0.02, Math.abs(current.current.y - current.start.y)),
+          rx: Math.max(0.001, Math.abs(current.current.x - current.start.x)),
+          ry: Math.max(0.001, Math.abs(current.current.y - current.start.y)),
           rotation: 0,
-          feather: 55,
+          feather: current.feather,
         },
-      });
-      props.onCommitEdit();
-    } else if (current.type === "object") {
-      const x = Math.min(current.start.x, current.current.x);
-      const y = Math.min(current.start.y, current.current.y);
-      const width = Math.abs(current.current.x - current.start.x);
-      const height = Math.abs(current.current.y - current.start.y);
-      const object =
-        width < 0.01 || height < 0.01
-          ? {
-              x: clamp(current.start.x - 0.18, 0, 0.64),
-              y: clamp(current.start.y - 0.18, 0, 0.64),
-              width: 0.36,
-              height: 0.36,
-            }
-          : {
-              x: clamp(x),
-              y: clamp(y),
-              width: Math.max(0.01, Math.min(width, 1 - x)),
-              height: Math.max(0.01, Math.min(height, 1 - y)),
-            };
-      props.onBeginEdit();
-      props.onUpdateMaskComponent(current.maskId, current.componentId, {
-        object,
       });
       props.onCommitEdit();
     }
@@ -1282,6 +1284,7 @@ export default function DevelopWorkspace(props: Props) {
     event: React.PointerEvent<SVGElement>,
     action: Extract<DraftGesture, { type: "linear-control" }>["action"],
   ) => {
+    if (spacePressed || event.button !== 0) return;
     if (!activeMaskGroup || activeMask?.kind !== "linear" || !activeMask.linear) {
       return;
     }
@@ -1304,6 +1307,7 @@ export default function DevelopWorkspace(props: Props) {
     event: React.PointerEvent<SVGElement>,
     action: Extract<DraftGesture, { type: "radial-control" }>["action"],
   ) => {
+    if (spacePressed || event.button !== 0) return;
     if (!activeMaskGroup || activeMask?.kind !== "radial" || !activeMask.radial) {
       return;
     }
@@ -1337,65 +1341,61 @@ export default function DevelopWorkspace(props: Props) {
 
     if (current.type === "linear-control") {
       const linear = { ...current.linear };
-      if (current.action === "start") {
-        linear.x1 = point.x;
-        linear.y1 = point.y;
-      } else if (current.action === "end") {
-        linear.x2 = point.x;
-        linear.y2 = point.y;
+      const dx = point.x - current.pointerStart.x;
+      const dy = point.y - current.pointerStart.y;
+      if (current.action === "start" || current.action === "end") {
+        const start = current.action === "start";
+        const other = { x: start ? linear.x2 : linear.x1, y: start ? linear.y2 : linear.y1 };
+        const requested = { x: (start ? linear.x1 : linear.x2) + dx, y: (start ? linear.y1 : linear.y2) + dy };
+        const next = event.shiftKey ? constrainGradientPoint(other, requested, "linear", sourceAspect) : requested;
+        if (start) { linear.x1 = next.x; linear.y1 = next.y; }
+        else { linear.x2 = next.x; linear.y2 = next.y; }
+      } else if (current.action === "start-guide" || current.action === "end-guide") {
+        const vx = (linear.x2 - linear.x1) * sourceAspect, vy = linear.y2 - linear.y1;
+        const length = Math.max(1e-8, vx * vx + vy * vy);
+        const projection = (dx * sourceAspect * vx + dy * vy) / length;
+        const shiftX = projection * vx / sourceAspect, shiftY = projection * vy;
+        if (current.action === "start-guide") { linear.x1 += shiftX; linear.y1 += shiftY; }
+        else { linear.x2 += shiftX; linear.y2 += shiftY; }
+      } else if (current.action === "rotate") {
+        const m = linearMetrics(linear, sourceAspect);
+        let rotation = Math.atan2(point.y - m.cy, (point.x - m.cx) * sourceAspect) * 180 / Math.PI;
+        if (event.shiftKey) rotation = Math.round(rotation / 45) * 45;
+        Object.assign(linear, linearFromCenter(m.cx, m.cy, m.length, rotation, sourceAspect));
       } else {
-        const requestedX = point.x - current.pointerStart.x;
-        const requestedY = point.y - current.pointerStart.y;
-        const dx = clamp(
-          requestedX,
-          -Math.min(current.linear.x1, current.linear.x2),
-          1 - Math.max(current.linear.x1, current.linear.x2),
-        );
-        const dy = clamp(
-          requestedY,
-          -Math.min(current.linear.y1, current.linear.y2),
-          1 - Math.max(current.linear.y1, current.linear.y2),
-        );
-        linear.x1 += dx;
-        linear.y1 += dy;
-        linear.x2 += dx;
-        linear.y2 += dy;
+        linear.x1 += dx; linear.y1 += dy; linear.x2 += dx; linear.y2 += dy;
       }
       queueMaskUpdate(current.maskId, current.componentId, {
         linear,
       });
     } else {
       const radial = { ...current.radial };
-      const angle = (current.radial.rotation * Math.PI) / 180;
-      const cosine = Math.cos(angle);
-      const sine = Math.sin(angle);
-      const pointX = point.x - current.radial.cx;
+      const pointX = (point.x - current.radial.cx) * sourceAspect;
       const pointY = point.y - current.radial.cy;
-      const localX = cosine * pointX + sine * pointY;
-      const localY = -sine * pointX + cosine * pointY;
-
+      const local = radialLocalPoint(current.radial, point, sourceAspect);
+      const localX = local.x, localY = local.y;
       if (current.action === "center") {
         radial.cx = clamp(
-          current.radial.cx + point.x - current.pointerStart.x,
+          current.radial.cx + point.x - current.pointerStart.x, -4, 5,
         );
         radial.cy = clamp(
-          current.radial.cy + point.y - current.pointerStart.y,
+          current.radial.cy + point.y - current.pointerStart.y, -4, 5,
         );
       } else if (current.action === "resize-x") {
-        radial.rx = clamp(Math.abs(localX), 0.005, 1.5);
+        radial.rx = clamp(Math.abs(localX), 0.001, 5);
       } else if (current.action === "resize-y") {
-        radial.ry = clamp(Math.abs(localY), 0.005, 1.5);
+        radial.ry = clamp(Math.abs(localY), 0.001, 5);
       } else if (current.action === "resize-both") {
         const diagonalScale = Math.SQRT1_2;
         radial.rx = clamp(
           Math.abs(localX) / diagonalScale,
-          0.005,
-          1.5,
+          0.001,
+          5,
         );
         radial.ry = clamp(
           Math.abs(localY) / diagonalScale,
-          0.005,
-          1.5,
+          0.001,
+          5,
         );
       } else if (current.action === "rotate") {
         radial.rotation =
@@ -1409,6 +1409,12 @@ export default function DevelopWorkspace(props: Props) {
         );
         radial.feather = clamp((1 - radius) * 100, 0, 100);
       }
+      if (event.shiftKey && current.action.startsWith("resize")) {
+        const scale = current.action === "resize-y" ? radial.ry / current.radial.ry : radial.rx / current.radial.rx;
+        radial.rx = clamp(current.radial.rx * scale, 0.001, 5);
+        radial.ry = clamp(current.radial.ry * scale, 0.001, 5);
+      }
+      if (event.shiftKey && current.action === "rotate") radial.rotation = Math.round(radial.rotation / 15) * 15;
       queueMaskUpdate(current.maskId, current.componentId, {
         radial,
       });
@@ -1427,6 +1433,14 @@ export default function DevelopWorkspace(props: Props) {
     }
     event.preventDefault();
     event.stopPropagation();
+    if (event.type === "pointercancel") {
+      if (maskUpdateFrameRef.current !== null) cancelAnimationFrame(maskUpdateFrameRef.current);
+      maskUpdateFrameRef.current = null; pendingMaskUpdateRef.current = null;
+      props.onUpdateMaskComponent(current.maskId, current.componentId, current.type === "linear-control" ? { linear: current.linear } : { radial: current.radial });
+      if (current.started) props.onCommitEdit();
+      setDraftGesture(null); return;
+    }
+    if (event.type === "pointerup" && current.started) moveMaskControlGesture(event);
     setDraftGesture(null);
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId);
@@ -1457,13 +1471,13 @@ export default function DevelopWorkspace(props: Props) {
       event.key === "ArrowUp" ? -step : event.key === "ArrowDown" ? step : 0;
     const dx = clamp(
       requestedX,
-      -Math.min(activeMask.linear.x1, activeMask.linear.x2),
-      1 - Math.max(activeMask.linear.x1, activeMask.linear.x2),
+      -4 - Math.min(activeMask.linear.x1, activeMask.linear.x2),
+      5 - Math.max(activeMask.linear.x1, activeMask.linear.x2),
     );
     const dy = clamp(
       requestedY,
-      -Math.min(activeMask.linear.y1, activeMask.linear.y2),
-      1 - Math.max(activeMask.linear.y1, activeMask.linear.y2),
+      -4 - Math.min(activeMask.linear.y1, activeMask.linear.y2),
+      5 - Math.max(activeMask.linear.y1, activeMask.linear.y2),
     );
     props.onBeginEdit();
     props.onUpdateMaskComponent(activeMaskGroup.id, activeMask.id, {
@@ -1499,8 +1513,8 @@ export default function DevelopWorkspace(props: Props) {
     props.onUpdateMaskComponent(activeMaskGroup.id, activeMask.id, {
       radial: {
         ...activeMask.radial,
-        cx: clamp(activeMask.radial.cx + dx),
-        cy: clamp(activeMask.radial.cy + dy),
+        cx: clamp(activeMask.radial.cx + dx, -4, 5),
+        cy: clamp(activeMask.radial.cy + dy, -4, 5),
       },
     });
     props.onCommitEdit();
@@ -1714,44 +1728,6 @@ export default function DevelopWorkspace(props: Props) {
     };
   })();
 
-  const linearDraft = (() => {
-    if (gesture?.type !== "linear") return null;
-    const start = canvasPoint(gesture.start.x, gesture.start.y);
-    const current = canvasPoint(gesture.current.x, gesture.current.y);
-    return {
-      left: `${start.x}px`,
-      top: `${start.y}px`,
-      width: `${Math.hypot(current.x - start.x, current.y - start.y)}px`,
-      transform: `rotate(${Math.atan2(current.y - start.y, current.x - start.x)}rad)`,
-    };
-  })();
-
-  const radialDraft = (() => {
-    if (gesture?.type !== "radial") return null;
-    const center = canvasPoint(gesture.start.x, gesture.start.y);
-    const edge = canvasPoint(gesture.current.x, gesture.current.y);
-    const radiusX = Math.abs(edge.x - center.x);
-    const radiusY = Math.abs(edge.y - center.y);
-    return {
-      left: `${center.x - radiusX}px`,
-      top: `${center.y - radiusY}px`,
-      width: `${radiusX * 2}px`,
-      height: `${radiusY * 2}px`,
-    };
-  })();
-
-  const objectDraft = (() => {
-    if (gesture?.type !== "object") return null;
-    const start = canvasPoint(gesture.start.x, gesture.start.y);
-    const current = canvasPoint(gesture.current.x, gesture.current.y);
-    return {
-      left: `${Math.min(start.x, current.x)}px`,
-      top: `${Math.min(start.y, current.y)}px`,
-      width: `${Math.abs(current.x - start.x)}px`,
-      height: `${Math.abs(current.y - start.y)}px`,
-    };
-  })();
-
   const mappedEllipsePath = (
     centerX: number,
     centerY: number,
@@ -1768,8 +1744,8 @@ export default function DevelopWorkspace(props: Props) {
       const localX = Math.cos(angle) * radiusX * scale;
       const localY = Math.sin(angle) * radiusY * scale;
       return canvasPoint(
-        centerX + cosine * localX - sine * localY,
-        centerY + sine * localX + cosine * localY,
+        centerX + cosine * localX - sine * localY / sourceAspect,
+        centerY + sine * localX * sourceAspect + cosine * localY,
       );
     });
     if (!points.length) return "";
@@ -1782,58 +1758,42 @@ export default function DevelopWorkspace(props: Props) {
     if (
       tool !== "mask" ||
       activeMask?.kind !== "linear" ||
-      !activeMask.linear ||
-      gesture?.type === "linear"
+      activeMask.placed === false ||
+      !activeMask.linear
     ) {
       return null;
     }
-    const start = canvasPoint(activeMask.linear.x1, activeMask.linear.y1);
-    const end = canvasPoint(activeMask.linear.x2, activeMask.linear.y2);
-    const feather = {
-      x: (start.x + end.x) / 2,
-      y: (start.y + end.y) / 2,
+    const g = activeMask.linear;
+    const m = linearMetrics(g, sourceAspect);
+    const start = canvasPoint(g.x1, g.y1), end = canvasPoint(g.x2, g.y2);
+    const feather = canvasPoint(m.cx, m.cy);
+    const dx = (g.x2 - g.x1) * sourceAspect, dy = g.y2 - g.y1;
+    const length = Math.max(0.001, Math.hypot(dx, dy));
+    const px = -dy / length / sourceAspect * 6, py = dx / length * 6;
+    const guide = (x: number, y: number) => {
+      const a = canvasPoint(x - px, y - py), b = canvasPoint(x + px, y + py);
+      return { x1: a.x, y1: a.y, x2: b.x, y2: b.y };
     };
-    const deltaX = end.x - start.x;
-    const deltaY = end.y - start.y;
-    const length = Math.max(0.001, Math.hypot(deltaX, deltaY));
-    const perpendicularX = -deltaY / length;
-    const perpendicularY = deltaX / length;
-    const halfGuideLength =
-      Math.max(400, Math.hypot(cropCanvasWidth, cropCanvasHeight)) * 1.25;
-    const guide = (point: { x: number; y: number }) => ({
-      x1: point.x - perpendicularX * halfGuideLength,
-      y1: point.y - perpendicularY * halfGuideLength,
-      x2: point.x + perpendicularX * halfGuideLength,
-      y2: point.y + perpendicularY * halfGuideLength,
-    });
-    return {
-      start,
-      end,
-      feather,
-      startGuide: guide(start),
-      endGuide: guide(end),
-      featherGuide: guide(feather),
-    };
+    return { start, end, feather,
+      rotate: canvasPoint(g.x2 + dx / length / sourceAspect * 0.07, g.y2 + dy / length * 0.07),
+      startGuide: guide(g.x1, g.y1), endGuide: guide(g.x2, g.y2), featherGuide: guide(m.cx, m.cy) };
+
   })();
 
   const radialControl = (() => {
     if (
       tool !== "mask" ||
       activeMask?.kind !== "radial" ||
-      !activeMask.radial ||
-      gesture?.type === "radial"
+      activeMask.placed === false ||
+      !activeMask.radial
     ) {
       return null;
     }
     const radial = activeMask.radial;
-    const radians = (radial.rotation * Math.PI) / 180;
-    const cosine = Math.cos(radians);
-    const sine = Math.sin(radians);
-    const point = (localX: number, localY: number) =>
-      canvasPoint(
-        radial.cx + cosine * localX - sine * localY,
-        radial.cy + sine * localX + cosine * localY,
-      );
+    const point = (localX: number, localY: number) => {
+      const mapped = radialPoint(radial, localX, localY, sourceAspect);
+      return canvasPoint(mapped.x, mapped.y);
+    };
     const featherScale = clamp(1 - radial.feather / 100, 0.001, 1);
     const north = point(0, -radial.ry);
     const rotate = point(
@@ -1879,9 +1839,7 @@ export default function DevelopWorkspace(props: Props) {
   const brushCursor = (() => {
     if (!brushCursorPoint) return null;
     const normalizedDiameter =
-      props.maskBrushSettings.size <= 1
-        ? props.maskBrushSettings.size
-        : props.maskBrushSettings.size / 100;
+      props.maskBrushSettings.size / 100;
     const pressure =
       gesture?.type === "brush"
         ? clamp(gesture.points[gesture.points.length - 1]?.pressure ?? 1, 0.05, 1)
@@ -1922,41 +1880,6 @@ export default function DevelopWorkspace(props: Props) {
     };
   })();
 
-  const brushDraft = (() => {
-    if (gesture?.type !== "brush" || !gesture.points.length) return null;
-    const points = gesture.points.map((point) => canvasPoint(point.x, point.y));
-    const path =
-      points.length === 1
-        ? `M${points[0].x} ${points[0].y} l0.01 0`
-        : points
-            .map((point, index) => `${index ? "L" : "M"}${point.x} ${point.y}`)
-            .join(" ");
-    const normalizedDiameter =
-      props.maskBrushSettings.size <= 1
-        ? props.maskBrushSettings.size
-        : props.maskBrushSettings.size / 100;
-    const lastPoint = gesture.points[gesture.points.length - 1];
-    const pressureScale =
-      0.35 + clamp(lastPoint.pressure ?? 1, 0.05, 1) * 0.65;
-    const top = canvasPoint(
-      lastPoint.x,
-      lastPoint.y - normalizedDiameter * pressureScale * 0.5,
-    );
-    const bottom = canvasPoint(
-      lastPoint.x,
-      lastPoint.y + normalizedDiameter * pressureScale * 0.5,
-    );
-    const outerWidth = Math.max(2, Math.hypot(bottom.x - top.x, bottom.y - top.y));
-    return {
-      path,
-      outerWidth,
-      innerWidth: Math.max(
-        1,
-        outerWidth * (1 - props.maskBrushSettings.feather / 100),
-      ),
-      erase: gesture.erase,
-    };
-  })();
 
   return (
     <main className="develop-workspace">
@@ -2099,40 +2022,8 @@ export default function DevelopWorkspace(props: Props) {
               ) : null}
             </svg>
           ) : null}
-          {linearDraft ? (
-            <div className="mask-linear-draft" style={linearDraft}>
-              <span />
-            </div>
-          ) : null}
-          {radialDraft ? <div className="mask-radial-draft" style={radialDraft} /> : null}
-          {objectDraft ? <div className="mask-object-draft" style={objectDraft} /> : null}
-          {brushDraft || brushCursor ? (
-            <svg
-              className="mask-brush-overlay"
-              width="100%"
-              height="100%"
-              aria-hidden="true"
-            >
-              {brushDraft ? (
-                <>
-                  <path
-                    className={`mask-brush-draft__outer${
-                      brushDraft.erase ? " is-erasing" : ""
-                    }`}
-                    d={brushDraft.path}
-                    stroke={activeMaskGroup?.overlayColor ?? "#ef5350"}
-                    strokeWidth={brushDraft.outerWidth}
-                  />
-                  <path
-                    className={`mask-brush-draft__core${
-                      brushDraft.erase ? " is-erasing" : ""
-                    }`}
-                    d={brushDraft.path}
-                    stroke={activeMaskGroup?.overlayColor ?? "#ef5350"}
-                    strokeWidth={brushDraft.innerWidth}
-                  />
-                </>
-              ) : null}
+          {brushCursor ? (
+            <svg className="mask-brush-overlay" width="100%" height="100%" aria-hidden="true">
               {brushCursor ? (
                 <>
                   <path
@@ -2193,7 +2084,7 @@ export default function DevelopWorkspace(props: Props) {
                 className="mask-control__guide-hit mask-control__guide-hit--endpoint"
                 {...linearControl.startGuide}
                 onPointerDown={(event) =>
-                  beginLinearControlGesture(event, "start")
+                  beginLinearControlGesture(event, "start-guide")
                 }
                 onPointerMove={moveMaskControlGesture}
                 onPointerUp={endMaskControlGesture}
@@ -2215,7 +2106,7 @@ export default function DevelopWorkspace(props: Props) {
                 className="mask-control__guide-hit mask-control__guide-hit--endpoint"
                 {...linearControl.endGuide}
                 onPointerDown={(event) =>
-                  beginLinearControlGesture(event, "end")
+                  beginLinearControlGesture(event, "end-guide")
                 }
                 onPointerMove={moveMaskControlGesture}
                 onPointerUp={endMaskControlGesture}
@@ -2227,6 +2118,7 @@ export default function DevelopWorkspace(props: Props) {
                   ["start", linearControl.start, "start"],
                   ["feather", linearControl.feather, "feather"],
                   ["end", linearControl.end, "end"],
+                  ["rotate", linearControl.rotate, "rotate"],
                 ] as const
               ).map(([key, point, action]) => (
                 <g key={key}>
@@ -2235,11 +2127,11 @@ export default function DevelopWorkspace(props: Props) {
                     cx={point.x}
                     cy={point.y}
                     r={12 / Math.max(0.25, zoom)}
-                    role={action === "feather" ? "button" : undefined}
+                    role="button"
                     aria-label={
                       action === "feather"
                         ? `Move ${activeMask?.name ?? "linear gradient"}`
-                        : undefined
+                        : `${action === "rotate" ? "Rotate" : "Resize"} linear gradient ${action}`
                     }
                     tabIndex={action === "feather" ? 0 : undefined}
                     onPointerDown={(event) =>

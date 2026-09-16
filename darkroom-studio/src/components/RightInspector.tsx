@@ -8,7 +8,6 @@ import {
   ChevronRight,
   CircleDashed,
   CircleDotDashed,
-  CloudSun,
   Copy,
   Crop,
   Focus,
@@ -23,21 +22,16 @@ import {
   Sparkles,
   SunMedium,
   Trash2,
-  UserRound,
 } from "lucide-react";
 import {
   BUILT_IN_PRESETS,
   canonicalProfileName,
   DEFAULT_GLOBAL_ADJUSTMENTS,
+  DEFAULT_LOCAL_ADJUSTMENTS,
   HUE_CHANNELS,
 } from "../defaults";
-import {
-  getMaskComponents,
-  legacyRegionForPeopleFeatures,
-  normalizePeopleFeatures,
-  PEOPLE_FEATURE_LABELS,
-  PEOPLE_FEATURES,
-} from "../lib/maskMath";
+import { getMaskComponents } from "../lib/maskMath";
+import { linearFromCenter, linearMetrics } from "../lib/maskGeometry";
 import type {
   BrushStroke,
   CalibrationAdjustments,
@@ -60,7 +54,6 @@ import type {
   Mask,
   MaskComponent,
   MaskKind,
-  PeopleFeature,
   PhotoMetadata,
   PhotoRecord,
   PointColorAdjustments,
@@ -162,7 +155,6 @@ type InspectorProps = {
   onUprightGuidesChange: (guides: UprightGuide[]) => void;
   onCropChange: (crop: CropState) => void;
   onCreateMask: (kind: MaskKind) => void;
-  onCreatePeopleMasks: (features: PeopleFeature[], separate: boolean) => void;
   onSelectMask: (id: string) => void;
   onSelectMaskComponent: (groupId: string, componentId: string) => void;
   onAddMaskComponent: (
@@ -267,7 +259,7 @@ const LOCAL_CONTROLS: {
   max: number;
   step?: number;
 }[] = [
-  { key: "exposure", label: "Exposure", min: -4, max: 4, step: 0.01 },
+  { key: "exposure", label: "Exposure", min: -5, max: 5, step: 0.01 },
   { key: "contrast", label: "Contrast", min: -100, max: 100 },
   { key: "highlights", label: "Highlights", min: -100, max: 100 },
   { key: "shadows", label: "Shadows", min: -100, max: 100 },
@@ -284,7 +276,7 @@ const LOCAL_CONTROLS: {
   { key: "sharpness", label: "Sharpness", min: -100, max: 100 },
   { key: "noiseReduction", label: "Noise reduction", min: 0, max: 100 },
   { key: "moire", label: "Moiré", min: 0, max: 100 },
-  { key: "defringe", label: "Defringe", min: -100, max: 100 },
+  { key: "defringe", label: "Defringe", min: 0, max: 100 },
 ];
 
 function SliderSection({
@@ -835,64 +827,14 @@ type MaskCreationOption = {
   label: string;
   icon: typeof Brush;
   description: string;
-  estimateLabel?: string;
 };
 
 const MASK_CREATION_GROUPS: {
-  id: "ai" | "manual" | "range";
+  id: "manual" | "range";
   label: string;
   description: string;
   options: MaskCreationOption[];
 }[] = [
-  {
-    id: "ai",
-    label: "AI",
-    description: "Local estimates — refine the result after creating it.",
-    options: [
-      {
-        kind: "subject",
-        label: "Subject",
-        icon: UserRound,
-        description: "Estimate the main subject locally",
-        estimateLabel: "Local estimate",
-      },
-      {
-        kind: "sky",
-        label: "Sky",
-        icon: CloudSun,
-        description: "Estimate the sky locally",
-        estimateLabel: "Local estimate",
-      },
-      {
-        kind: "background",
-        label: "Background",
-        icon: Aperture,
-        description: "Estimate the area behind the main subject locally",
-        estimateLabel: "Local estimate",
-      },
-      {
-        kind: "object",
-        label: "Object",
-        icon: LocateFixed,
-        description: "Estimate an object inside a chosen region locally",
-        estimateLabel: "Local estimate",
-      },
-      {
-        kind: "people",
-        label: "People",
-        icon: UserRound,
-        description: "Estimate people or selected features locally",
-        estimateLabel: "Local estimate",
-      },
-      {
-        kind: "landscape",
-        label: "Landscape",
-        icon: CloudSun,
-        description: "Estimate a landscape element locally",
-        estimateLabel: "Local estimate",
-      },
-    ],
-  },
   {
     id: "manual",
     label: "Manual",
@@ -921,7 +863,7 @@ const MASK_CREATION_GROUPS: {
   {
     id: "range",
     label: "Range",
-    description: "Select pixels by tone, color, or estimated depth.",
+    description: "Select pixels by tone or color.",
     options: [
       {
         kind: "luminance",
@@ -935,33 +877,11 @@ const MASK_CREATION_GROUPS: {
         icon: Aperture,
         description: "Select a color range",
       },
-      {
-        kind: "depth",
-        label: "Depth Range",
-        icon: Blend,
-        description: "Estimate a distance range locally",
-        estimateLabel: "Estimated depth",
-      },
     ],
   },
 ];
 
 const MASK_OPTIONS = MASK_CREATION_GROUPS.flatMap((group) => group.options);
-
-const togglePeopleFeature = (
-  current: readonly PeopleFeature[],
-  feature: PeopleFeature,
-): PeopleFeature[] => {
-  if (feature === "wholePerson") return ["wholePerson"];
-  const partFeatures = current.filter(
-    (candidate) => candidate !== "wholePerson",
-  );
-  if (partFeatures.includes(feature)) {
-    const next = partFeatures.filter((candidate) => candidate !== feature);
-    return next.length ? next : [feature];
-  }
-  return [...partFeatures, feature];
-};
 
 const MASK_OPERATION_LABELS: Record<MaskComponent["operation"], string> = {
   add: "Add",
@@ -1002,7 +922,6 @@ function MaskComponentMenu({
                 kind,
                 label: optionLabel,
                 icon: OptionIcon,
-                estimateLabel,
               }) => (
                 <button
                   key={kind}
@@ -1016,9 +935,7 @@ function MaskComponentMenu({
                 >
                   <OptionIcon size={13} aria-hidden="true" />
                   <span>{optionLabel}</span>
-                  {estimateLabel && !optionLabel.includes("(estimated)") ? (
-                    <small>{estimateLabel}</small>
-                  ) : null}
+
                 </button>
               ),
             )}
@@ -1030,12 +947,6 @@ function MaskComponentMenu({
 }
 
 function MaskInspector(props: InspectorProps) {
-  const [peopleDraftFeatures, setPeopleDraftFeatures] = useState<PeopleFeature[]>([
-    "wholePerson",
-  ]);
-  const [peopleCreateMode, setPeopleCreateMode] = useState<
-    "combined" | "separate"
-  >("combined");
   const selectedMask =
     props.photo.edits.masks.find((mask) => mask.id === props.activeMaskId) ?? null;
   const selectedMaskComponents = selectedMask
@@ -1100,31 +1011,15 @@ function MaskInspector(props: InspectorProps) {
         <Icon size={variant === "card" ? 18 : 15} strokeWidth={1.55} aria-hidden="true" />
         <span>
           <strong>{option.label}</strong>
-          {option.estimateLabel ? <small>Estimated</small> : null}
         </span>
       </button>
     );
   };
 
-  const topOptions = (["subject", "sky", "background"] as const)
-    .map((kind) => MASK_OPTIONS.find((option) => option.kind === kind))
-    .filter((option): option is MaskCreationOption => Boolean(option));
-  const manualOptions = ([
-    "landscape",
-    "object",
-    "brush",
-    "linear",
-    "radial",
-    "luminance",
-    "color",
-    "depth",
-  ] as const)
-    .map((kind) => MASK_OPTIONS.find((option) => option.kind === kind))
-    .filter((option): option is MaskCreationOption => Boolean(option));
-  const peopleOption = MASK_OPTIONS.find((option) => option.kind === "people");
-  const peopleMasksToCreate =
-    peopleCreateMode === "separate" ? peopleDraftFeatures.length : 1;
-  const peopleMaskCapacity = 8 - props.photo.edits.masks.length;
+  const topOptions = MASK_CREATION_GROUPS[0].options;
+  const manualOptions = MASK_CREATION_GROUPS[1].options;
+  const aspect = Math.max(1, props.photo.width) / Math.max(1, props.photo.height);
+  const linear = selectedComponent?.linear ? linearMetrics(selectedComponent.linear, aspect) : null;
 
   return (
     <>
@@ -1147,83 +1042,7 @@ function MaskInspector(props: InspectorProps) {
           <div className="mask-create-compact__rows">
             {manualOptions.map((option) => renderCreationOption(option))}
           </div>
-          {peopleOption ? (
-            <section className="mask-create-compact__people">
-              <div className="people-mask-card__heading">
-                <span className="people-mask-card__avatar" aria-hidden="true">
-                  <UserRound size={17} strokeWidth={1.5} />
-                </span>
-                <span>
-                  <strong>Person 1</strong>
-                  <small>One locally estimated candidate</small>
-                </span>
-              </div>
-              <p className="people-mask-card__note">
-                Local pixel analysis only. Refine the estimate after creating it.
-              </p>
-              <fieldset className="people-feature-picker">
-                <legend>Features</legend>
-                {PEOPLE_FEATURES.map((feature) => (
-                  <label key={feature}>
-                    <input
-                      type="checkbox"
-                      checked={peopleDraftFeatures.includes(feature)}
-                      onChange={() =>
-                        setPeopleDraftFeatures((current) =>
-                          togglePeopleFeature(current, feature),
-                        )
-                      }
-                    />
-                    <span>{PEOPLE_FEATURE_LABELS[feature]}</span>
-                    {feature === "facialHair" ? <small>When present</small> : null}
-                  </label>
-                ))}
-              </fieldset>
-              <fieldset className="people-mask-create-mode">
-                <legend>Create as</legend>
-                <label>
-                  <input
-                    type="radio"
-                    name="people-mask-create-mode"
-                    checked={peopleCreateMode === "combined"}
-                    onChange={() => setPeopleCreateMode("combined")}
-                  />
-                  <span>One combined mask</span>
-                </label>
-                <label>
-                  <input
-                    type="radio"
-                    name="people-mask-create-mode"
-                    checked={peopleCreateMode === "separate"}
-                    onChange={() => setPeopleCreateMode("separate")}
-                  />
-                  <span>Separate masks</span>
-                </label>
-              </fieldset>
-              <button
-                type="button"
-                className="people-mask-create-button"
-                disabled={peopleMasksToCreate > peopleMaskCapacity}
-                onClick={() =>
-                  props.onCreatePeopleMasks(
-                    peopleDraftFeatures,
-                    peopleCreateMode === "separate",
-                  )
-                }
-              >
-                {peopleCreateMode === "separate"
-                  ? `Create ${peopleMasksToCreate} ${
-                      peopleMasksToCreate === 1 ? "mask" : "masks"
-                    }`
-                  : "Create combined mask"}
-              </button>
-              {peopleMasksToCreate > peopleMaskCapacity ? (
-                <small className="people-mask-card__limit">
-                  Only {peopleMaskCapacity} mask {peopleMaskCapacity === 1 ? "slot" : "slots"} remaining.
-                </small>
-              ) : null}
-            </section>
-          ) : null}
+
         </div>
       </Panel>
       {props.photo.edits.masks.length ? (
@@ -1547,16 +1366,6 @@ function MaskInspector(props: InspectorProps) {
                 }
                 formatValue={(value) => `${Math.round(value)}%`}
               />
-              {selectedComponentOption?.estimateLabel ? (
-                <p className="mask-component-estimate-note">
-                  {selectedComponent.kind === "depth"
-                    ? "Depth is estimated locally; embedded depth maps are not currently used."
-                    : selectedComponent.kind === "people"
-                      ? "Person 1 and its features are estimated locally; no connected identity or cloud model is used."
-                    : "This selection is a local estimate."}{" "}
-                  Refine it with Add, Subtract, or Intersect components.
-                </p>
-              ) : null}
             </Panel>
           ) : null}
           {selectedComponent?.kind === "brush" ? (
@@ -1564,7 +1373,8 @@ function MaskInspector(props: InspectorProps) {
               <AdjustmentSlider
                 label="Size"
                 value={props.maskBrushSettings.size}
-                min={2}
+                min={0.1}
+                step={0.1}
                 max={100}
                 defaultValue={34}
                 onChange={(size) =>
@@ -1625,7 +1435,7 @@ function MaskInspector(props: InspectorProps) {
                       })
                     }
                   />
-                  <span>Auto mask</span>
+                  <span>Edge-aware brush</span>
                 </label>
                 <label className="mask-toggle">
                   <input
@@ -1643,12 +1453,37 @@ function MaskInspector(props: InspectorProps) {
               </div>
             </Panel>
           ) : null}
+          {selectedComponent?.kind === "linear" && linear ? (
+            <Panel title="Linear gradient" defaultOpen>
+              <p className="field__hint mask-component-help">Drag to draw. Move the center pin; drag the outer lines to change the transition. Shift snaps the angle.</p>
+              {([
+                ["cx", "Center X", -400, 500, linear.cx * 100],
+                ["cy", "Center Y", -400, 500, linear.cy * 100],
+                ["length", "Transition", 0.1, 500, linear.length * 100],
+                ["rotation", "Angle", -180, 180, linear.rotation],
+              ] as const).map(([key, label, min, max, value]) => (
+                <AdjustmentSlider key={key} label={label} value={value} min={min} max={max} step={0.1}
+                  defaultValue={key === "rotation" ? 90 : key === "length" ? 60 : 50}
+                  onBegin={props.onBeginEdit} onCommit={props.onCommitEdit}
+                  onChange={value => {
+                    const next = { ...linear, [key]: key === "rotation" ? value : value / 100 };
+                    updateSelectedComponent({ linear: linearFromCenter(next.cx, next.cy, next.length, next.rotation, aspect) });
+                  }} />
+              ))}
+            </Panel>
+          ) : null}
           {selectedComponent?.kind === "radial" &&
           selectedComponent.radial ? (
             <Panel title="Radial range" defaultOpen>
               <p className="field__hint mask-component-help">
-                Drag on the image to draw or reposition the radial range.
+                Drag to draw. Move the center pin, resize with the handles, or drag the rotation handle. Shift locks proportions.
               </p>
+              {([ ["cx", "Center X", -400, 500], ["cy", "Center Y", -400, 500], ["rx", "Width", 0.2, 1000], ["ry", "Height", 0.2, 1000] ] as const).map(([key, label, min, max]) => (
+                <AdjustmentSlider key={key} label={label} min={min} max={max} step={0.1}
+                  value={selectedComponent.radial![key] * (key === "rx" || key === "ry" ? 200 : 100)}
+                  defaultValue={50} onBegin={props.onBeginEdit} onCommit={props.onCommitEdit}
+                  onChange={value => updateSelectedComponent({ radial: { ...selectedComponent.radial!, [key]: value / (key === "rx" || key === "ry" ? 200 : 100) } })} />
+              ))}
               <AdjustmentSlider
                 label="Feather"
                 value={selectedComponent.radial.feather}
@@ -1679,140 +1514,6 @@ function MaskInspector(props: InspectorProps) {
                 }
                 formatValue={(value) => `${value.toFixed(1)}°`}
               />
-            </Panel>
-          ) : null}
-          {selectedComponent?.kind === "object" &&
-          selectedComponent.object ? (
-            <Panel title="Object region" defaultOpen>
-              <p className="field__hint mask-component-help">
-                Drag on the image to draw the object rectangle, or fine-tune
-                its bounds here.
-              </p>
-              <div className="adjustment-list">
-                {(
-                  [
-                    ["x", "Left"],
-                    ["y", "Top"],
-                    ["width", "Width"],
-                    ["height", "Height"],
-                  ] as const
-                ).map(([key, label]) => (
-                  <AdjustmentSlider
-                    key={key}
-                    label={label}
-                    value={selectedComponent.object![key] * 100}
-                    min={0}
-                    max={100}
-                    defaultValue={
-                      key === "x" || key === "y" ? 30 : 40
-                    }
-                    onBegin={props.onBeginEdit}
-                    onCommit={props.onCommitEdit}
-                    onChange={(value) =>
-                      updateSelectedComponent({
-                        object: {
-                          ...selectedComponent.object!,
-                          [key]: value / 100,
-                        },
-                      })
-                    }
-                    formatValue={(value) => `${Math.round(value)}%`}
-                  />
-                ))}
-              </div>
-            </Panel>
-          ) : null}
-          {selectedComponent?.kind === "people" &&
-          selectedComponent.people ? (
-            <Panel title="Person 1 features" defaultOpen>
-              <p className="field__hint mask-component-help">
-                Local estimate. Select one or more features; whole person replaces
-                individual feature selections.
-              </p>
-              <div
-                className="people-feature-picker people-feature-picker--component"
-                role="group"
-                aria-label="Person 1 features"
-              >
-                {PEOPLE_FEATURES.map((feature) => {
-                  const selectedFeatures = normalizePeopleFeatures(
-                    selectedComponent.people?.features,
-                    selectedComponent.people?.region,
-                  );
-                  return (
-                    <label key={feature}>
-                      <input
-                        type="checkbox"
-                        checked={selectedFeatures.includes(feature)}
-                        onChange={() => {
-                          const features = togglePeopleFeature(
-                            selectedFeatures,
-                            feature,
-                          );
-                          props.onBeginEdit();
-                          updateSelectedComponent({
-                            people: {
-                              region: legacyRegionForPeopleFeatures(features),
-                              features,
-                              personId: "person-1",
-                            },
-                          });
-                          props.onCommitEdit();
-                        }}
-                      />
-                      <span>{PEOPLE_FEATURE_LABELS[feature]}</span>
-                      {feature === "facialHair" ? <small>When present</small> : null}
-                    </label>
-                  );
-                })}
-              </div>
-              <button
-                type="button"
-                className="people-mask-reset-button"
-                onClick={() => {
-                    props.onBeginEdit();
-                    updateSelectedComponent({
-                      people: {
-                        region: "all",
-                        features: ["wholePerson"],
-                        personId: "person-1",
-                      },
-                    });
-                    props.onCommitEdit();
-                  }}
-              >
-                Select whole person
-              </button>
-            </Panel>
-          ) : null}
-          {selectedComponent?.kind === "landscape" &&
-          selectedComponent.landscape ? (
-            <Panel title="Landscape element" defaultOpen>
-              <label className="field mask-region-field">
-                <span className="field__label">Include</span>
-                <select
-                  value={selectedComponent.landscape.element}
-                  onChange={(event) => {
-                    props.onBeginEdit();
-                    updateSelectedComponent({
-                      landscape: {
-                        element: event.target.value as NonNullable<
-                          MaskComponent["landscape"]
-                        >["element"],
-                      },
-                    });
-                    props.onCommitEdit();
-                  }}
-                >
-                  <option value="sky">Sky</option>
-                  <option value="mountains">Mountains</option>
-                  <option value="architecture">Architecture</option>
-                  <option value="vegetation">Vegetation</option>
-                  <option value="water">Water</option>
-                  <option value="snow">Snow</option>
-                  <option value="ground">Ground</option>
-                </select>
-              </label>
             </Panel>
           ) : null}
           {selectedComponent?.kind === "luminance" &&
@@ -1864,54 +1565,6 @@ function MaskInspector(props: InspectorProps) {
                     },
                   })
                 }
-              />
-            </Panel>
-          ) : null}
-          {selectedComponent?.kind === "depth" && selectedComponent.depth ? (
-            <Panel title="Depth range (estimated)" defaultOpen>
-              <AdjustmentSlider
-                label="Near"
-                value={selectedComponent.depth.min}
-                min={0}
-                max={100}
-                onBegin={props.onBeginEdit}
-                onCommit={props.onCommitEdit}
-                onChange={(min) =>
-                  updateSelectedComponent({
-                    depth: { ...selectedComponent.depth!, min },
-                  })
-                }
-                formatValue={(value) => `${Math.round(value)}%`}
-              />
-              <AdjustmentSlider
-                label="Far"
-                value={selectedComponent.depth.max}
-                min={0}
-                max={100}
-                defaultValue={100}
-                onBegin={props.onBeginEdit}
-                onCommit={props.onCommitEdit}
-                onChange={(max) =>
-                  updateSelectedComponent({
-                    depth: { ...selectedComponent.depth!, max },
-                  })
-                }
-                formatValue={(value) => `${Math.round(value)}%`}
-              />
-              <AdjustmentSlider
-                label="Smoothness"
-                value={selectedComponent.depth.smoothness}
-                min={0}
-                max={100}
-                defaultValue={35}
-                onBegin={props.onBeginEdit}
-                onCommit={props.onCommitEdit}
-                onChange={(smoothness) =>
-                  updateSelectedComponent({
-                    depth: { ...selectedComponent.depth!, smoothness },
-                  })
-                }
-                formatValue={(value) => `${Math.round(value)}%`}
               />
             </Panel>
           ) : null}
@@ -2013,7 +1666,16 @@ function MaskInspector(props: InspectorProps) {
               formatValue={(value) => `${Math.round(value)}%`}
             />
           </Panel>
-          <Panel title="Local adjustments" defaultOpen>
+          <Panel title="Local adjustments" defaultOpen action={
+            <button type="button" className="text-button" onClick={() => {
+              props.onBeginEdit();
+              props.onUpdateMask(selectedMask.id, { adjustments: { ...DEFAULT_LOCAL_ADJUSTMENTS }, amount: 100, grain: { amount: 0, size: 25, roughness: 50 }, curve: [{ x: 0, y: 0 }, { x: 1, y: 1 }] });
+              props.onCommitEdit();
+            }}>Reset</button>
+          }>
+            <AdjustmentSlider label="Amount" value={selectedMask.amount ?? 100} min={0} max={200} defaultValue={100}
+              onBegin={props.onBeginEdit} onCommit={props.onCommitEdit}
+              onChange={amount => props.onUpdateMask(selectedMask.id, { amount })} />
             <div className="adjustment-list">
               {LOCAL_CONTROLS.map((control) => (
                 <AdjustmentSlider
@@ -2033,6 +1695,23 @@ function MaskInspector(props: InspectorProps) {
                 />
               ))}
             </div>
+          </Panel>
+          <Panel title="Local grain">
+            {([ ["amount", "Grain", 0], ["size", "Grain size", 1], ["roughness", "Roughness", 0] ] as const).map(([key, label, min]) => (
+              <AdjustmentSlider key={key} label={label} min={min} max={100}
+                value={(selectedMask.grain ?? { amount: 0, size: 25, roughness: 50 })[key]}
+                defaultValue={key === "size" ? 25 : key === "roughness" ? 50 : 0}
+                onBegin={props.onBeginEdit} onCommit={props.onCommitEdit}
+                onChange={value => props.onUpdateMask(selectedMask.id, { grain: { ...(selectedMask.grain ?? {amount: 0, size: 25, roughness: 50}), [key]: value } })} />
+            ))}
+          </Panel>
+          <Panel title="Local tone curve" defaultOpen>
+            <CurveEditor points={selectedMask.curve ?? [{ x: 0, y: 0 }, { x: 1, y: 1 }]}
+              onBegin={props.onBeginEdit} onCommit={props.onCommitEdit}
+              onChange={curve => props.onUpdateMask(selectedMask.id, { curve })} />
+            <button type="button" className="text-button" onClick={() => {
+              props.onBeginEdit(); props.onUpdateMask(selectedMask.id, { curve: [{ x: 0, y: 0 }, { x: 1, y: 1 }] }); props.onCommitEdit();
+            }}>Reset curve</button>
           </Panel>
         </>
       ) : null}
@@ -2065,7 +1744,6 @@ function HealInspector(props: Pick<
     (spot) => spot.id === props.activeHealSpotId,
   ) ?? null;
   const modes = [
-    { mode: "remove" as const, label: "Remove", icon: Sparkles },
     { mode: "heal" as const, label: "Heal", icon: Bandage },
     { mode: "clone" as const, label: "Clone", icon: Copy },
   ];
@@ -2105,7 +1783,7 @@ function HealInspector(props: Pick<
           defaultValue={34}
           onChange={(size) => props.onHealSettingsChange({ ...props.healSettings, size })}
         />
-        {props.healSettings.mode !== "remove" ? (
+        {(
           <>
             <AdjustmentSlider
               label="Feather"
@@ -2124,20 +1802,8 @@ function HealInspector(props: Pick<
               onChange={(opacity) => props.onHealSettingsChange({ ...props.healSettings, opacity })}
             />
           </>
-        ) : null}
-        {props.healSettings.mode === "remove" ? (
-          <div className="remove-ai-options" aria-label="Remove options">
-            <label className="toggle-field" title="Requires a connected generative model; unavailable in this local build">
-              <input type="checkbox" disabled />
-              <span>Use generative AI</span>
-              <Info size={12} aria-hidden="true" />
-            </label>
-            <label className="toggle-field" title="Object detection requires a connected model; unavailable in this local build">
-              <input type="checkbox" disabled />
-              <span>Detect objects</span>
-            </label>
-          </div>
-        ) : null}
+        )}
+
       </div>
 
       {activeSpot ? (
@@ -2145,9 +1811,6 @@ function HealInspector(props: Pick<
           <div className="remove-selected__heading">
             <strong>Selected</strong>
             <div>
-              <button type="button" disabled title="Repair refinement is unavailable" aria-label="Refine selected repair">
-                <Brush size={14} />
-              </button>
               <button type="button" title="Delete selected repair" aria-label="Delete selected repair" onClick={() => props.onRemoveHealSpot(activeSpot.id)}>
                 <Trash2 size={14} />
               </button>
@@ -2156,7 +1819,7 @@ function HealInspector(props: Pick<
           <label className="field remove-fill-field">
             <span className="field__label">Fill</span>
             <select
-              value={activeSpot.mode}
+              value={activeSpot.mode === "remove" ? "heal" : activeSpot.mode}
               aria-label="Selected repair fill"
               onChange={(event) => {
                 props.onBeginEdit();
@@ -2166,7 +1829,6 @@ function HealInspector(props: Pick<
                 props.onCommitEdit();
               }}
             >
-              <option value="remove">Content-Aware Remove</option>
               <option value="heal">Heal</option>
               <option value="clone">Clone</option>
             </select>
@@ -2181,18 +1843,10 @@ function HealInspector(props: Pick<
             onCommit={props.onCommitEdit}
             onChange={(opacity) => props.onUpdateHealSpot(activeSpot.id, { opacity })}
           />
-          <div className="remove-variation-row">
-            <span>Variations</span>
-            <button type="button" disabled aria-label="Previous variation">‹</button>
-            <small>Unavailable</small>
-            <button type="button" disabled aria-label="Next variation">›</button>
-            <button type="button" disabled aria-label="More variation options">⋯</button>
-          </div>
           <div className="remove-selected__actions">
             <button type="button" onClick={() => props.onRecenterHealSource(activeSpot.id)} title="Try another source (/) ">
               <LocateFixed size={13} /> Refresh source
             </button>
-            <button type="button" disabled title="Requires a connected generative provider">Generate</button>
           </div>
         </section>
       ) : null}
@@ -2239,18 +1893,6 @@ function HealInspector(props: Pick<
         }}>Close</button>
       </div>
 
-      <section className="remove-distraction-section">
-        <strong>Distraction Removal</strong>
-        {[
-          ["Reflections", "Automatic reflection removal requires a connected model"],
-          ["People", "Automatic people removal requires a connected model"],
-          ["Dust", "Automatic dust detection requires a connected model"],
-        ].map(([label, title]) => (
-          <button key={label} type="button" disabled title={title}>
-            <ChevronDown size={12} /> {label}
-          </button>
-        ))}
-      </section>
     </div>
   );
 }
