@@ -9,6 +9,7 @@ import {
   useState,
 } from "react";
 import {
+  ArrowUpRight,
   Check,
   ChevronDown,
   CircleHelp,
@@ -134,6 +135,46 @@ const DEFAULT_EXPORT: ExportSettings = {
   watermarkOpacity: 0.7,
   watermarkPosition: "bottom-right",
 };
+
+const GITHUB_REPO_URL = "https://github.com/UdulaAbeykoon/darkroom";
+const GITHUB_REPO_API_URL = "https://api.github.com/repos/UdulaAbeykoon/darkroom";
+const GITHUB_STAR_CONFIRMED_KEY = "darkroom:github-star-confirmed";
+const GITHUB_STAR_CHECK_INTERVAL_MS = 4000;
+type GitHubStarStatus =
+  | "loading"
+  | "ready"
+  | "waiting"
+  | "popup-blocked"
+  | "unavailable"
+  | "confirmed";
+
+function hasConfirmedGitHubStar() {
+  try {
+    return window.localStorage.getItem(GITHUB_STAR_CONFIRMED_KEY) === "true";
+  } catch {
+    return false;
+  }
+}
+
+function rememberConfirmedGitHubStar() {
+  try {
+    window.localStorage.setItem(GITHUB_STAR_CONFIRMED_KEY, "true");
+  } catch {
+    // The card can still disappear for this session if storage is blocked.
+  }
+}
+
+async function fetchGitHubStarCount() {
+  const response = await fetch(GITHUB_REPO_API_URL, {
+    headers: { Accept: "application/vnd.github+json" },
+  });
+  if (!response.ok) throw new Error(`GitHub returned ${response.status}`);
+  const payload = (await response.json()) as { stargazers_count?: unknown };
+  if (typeof payload.stargazers_count !== "number") {
+    throw new Error("GitHub did not return a star count");
+  }
+  return payload.stargazers_count;
+}
 
 function makeId(prefix: string) {
   return `${prefix}-${crypto.randomUUID?.() ?? `${Date.now()}-${Math.random()}`}`;
@@ -293,6 +334,11 @@ export default function App() {
   const [exportSettings, setExportSettings] =
     useState<ExportSettings>(DEFAULT_EXPORT);
   const [toasts, setToasts] = useState<Toast[]>([]);
+  const [githubStarStatus, setGitHubStarStatus] = useState<GitHubStarStatus>(
+    () => (hasConfirmedGitHubStar() ? "confirmed" : "loading"),
+  );
+  const [githubStarBaseline, setGitHubStarBaseline] = useState<number | null>(null);
+  const githubStarWindowRef = useRef<Window | null>(null);
   const [historyVersion, setHistoryVersion] = useState(0);
   const [copiedEditState, setCopiedEditState] = useState<CopiedDevelopSettings | null>(null);
   const [showCopySettings, setShowCopySettings] = useState(false);
@@ -385,6 +431,66 @@ export default function App() {
     (message: string) => notify(message, "error"),
     [notify],
   );
+
+  useEffect(() => {
+    if (githubStarStatus === "confirmed") return;
+    let cancelled = false;
+    void fetchGitHubStarCount()
+      .then((count) => {
+        if (cancelled) return;
+        setGitHubStarBaseline(count);
+        setGitHubStarStatus("ready");
+      })
+      .catch(() => {
+        if (!cancelled) setGitHubStarStatus("unavailable");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (githubStarStatus !== "waiting" || githubStarBaseline === null) return;
+    let cancelled = false;
+    const checkForConfirmedStar = async () => {
+      if (githubStarWindowRef.current?.closed) {
+        setGitHubStarStatus("ready");
+        return;
+      }
+      try {
+        const currentCount = await fetchGitHubStarCount();
+        if (cancelled || currentCount <= githubStarBaseline) return;
+        rememberConfirmedGitHubStar();
+        setGitHubStarStatus("confirmed");
+      } catch {
+        // Keep checking. GitHub may briefly rate-limit or cache the count.
+      }
+    };
+    void checkForConfirmedStar();
+    const interval = window.setInterval(
+      () => void checkForConfirmedStar(),
+      GITHUB_STAR_CHECK_INTERVAL_MS,
+    );
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [githubStarBaseline, githubStarStatus]);
+
+  const openGitHubStarWindow = useCallback(() => {
+    const starWindow = window.open(
+      GITHUB_REPO_URL,
+      "darkroom-github-star",
+      "popup=yes,width=1040,height=760,resizable=yes,scrollbars=yes",
+    );
+    if (!starWindow) {
+      setGitHubStarStatus("popup-blocked");
+      return;
+    }
+    githubStarWindowRef.current = starWindow;
+    starWindow.focus();
+    setGitHubStarStatus(githubStarBaseline === null ? "unavailable" : "waiting");
+  }, []);
 
   const cycleCropOverlay = useCallback(() => {
     setCropOverlay((current) => {
@@ -2602,6 +2708,44 @@ export default function App() {
             onClose={() => setShowShortcuts(false)}
           />
         </Suspense>
+      ) : null}
+
+      {githubStarStatus !== "confirmed" ? (
+        <aside className="repo-star-card" aria-label="Support Darkroom on GitHub">
+          <div className="repo-star-card__intro">
+            <div className="repo-star-card__icon" aria-hidden="true">
+              <Star size={16} fill="currentColor" />
+            </div>
+            <div>
+              <strong>Enjoying Darkroom?</strong>
+              <p>Star the project in a small GitHub window while this app stays open.</p>
+            </div>
+          </div>
+          <button
+            className="repo-star-card__link"
+            type="button"
+            disabled={githubStarStatus === "loading"}
+            onClick={openGitHubStarWindow}
+          >
+            <span>
+              {githubStarStatus === "waiting"
+                ? "Waiting for your star…"
+                : githubStarStatus === "popup-blocked"
+                  ? "Allow pop-ups to continue"
+                  : "Star Darkroom on GitHub"}
+            </span>
+            <ArrowUpRight size={14} aria-hidden="true" />
+          </button>
+          <small className="repo-star-card__status">
+            {githubStarStatus === "waiting"
+              ? "This card disappears only after GitHub confirms the star."
+              : githubStarStatus === "popup-blocked"
+                  ? "Your browser blocked the GitHub window. Enable pop-ups, then try again."
+                : githubStarStatus === "unavailable"
+                  ? "Star verification needs a public GitHub repository, so this card will stay until your star is confirmed."
+                  : "This card disappears only after GitHub confirms the star."}
+          </small>
+        </aside>
       ) : null}
 
       <div className="toast-stack" aria-live="polite">

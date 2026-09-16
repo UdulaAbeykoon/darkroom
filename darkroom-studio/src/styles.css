@@ -8841,6 +8841,99 @@ body {
   background: linear-gradient(135deg, #171817 0 46%, #b5b5ad 47% 100%);
 }
 
+/* Project support prompt: compact enough to live above the filmstrip without
+   making the workspace feel like a marketing surface. */
+.repo-star-card {
+  position: fixed;
+  z-index: 1100;
+  right: 16px;
+  bottom: 16px;
+  display: grid;
+  width: min(300px, calc(100vw - 32px));
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid #3b5057;
+  border-left: 3px solid var(--safelight-bright);
+  color: #d9e0e1;
+  background: linear-gradient(145deg, #1d2729, #151a1b 72%);
+  box-shadow: 0 12px 30px rgb(0 0 0 / 0.42);
+}
+
+.repo-star-card__intro {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  align-items: start;
+  gap: 10px;
+}
+
+.repo-star-card__icon {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border: 1px solid #4b7380;
+  color: var(--safelight-bright);
+  background: #142126;
+}
+
+.repo-star-card strong {
+  display: block;
+  color: #f1f3ef;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.repo-star-card p {
+  margin: 3px 0 0;
+  color: #9eabad;
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+.repo-star-card__link {
+  display: flex;
+  min-height: 32px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 0 10px;
+  border: 1px solid #4e8292;
+  color: #e7f3f5;
+  background: #21404a;
+  font-size: 11px;
+  font-weight: 600;
+  text-align: left;
+  transition:
+    border-color var(--ease),
+    background-color var(--ease),
+    color var(--ease);
+}
+
+.repo-star-card__link:hover:not(:disabled) {
+  border-color: #7fcde5;
+  color: #fff;
+  background: #2a5867;
+}
+
+.repo-star-card__link:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.repo-star-card small {
+  color: #7d8e91;
+  font-size: 9px;
+  line-height: 1.35;
+}
+
+@media (max-width: 560px) {
+  .repo-star-card {
+    right: 10px;
+    bottom: 10px;
+    width: min(300px, calc(100vw - 20px));
+  }
+}
+
 /* Compact numeric entry preserves the inspector's established slider rhythm. */
 button.adjustment-slider__value {
   padding: 0;
