@@ -9,6 +9,7 @@ import {
   useState,
 } from "react";
 import {
+  ArrowUpRight,
   Check,
   ChevronDown,
   CircleHelp,
@@ -134,6 +135,25 @@ const DEFAULT_EXPORT: ExportSettings = {
   watermarkOpacity: 0.7,
   watermarkPosition: "bottom-right",
 };
+
+const GITHUB_REPO_URL = "https://github.com/UdulaAbeykoon/darkroom";
+const GITHUB_STAR_REMINDER_KEY = "darkroom:github-star-reminder-dismissed";
+
+function hasDismissedGitHubStarReminder() {
+  try {
+    return window.localStorage.getItem(GITHUB_STAR_REMINDER_KEY) === "true";
+  } catch {
+    return false;
+  }
+}
+
+function rememberGitHubStarReminderDismissal() {
+  try {
+    window.localStorage.setItem(GITHUB_STAR_REMINDER_KEY, "true");
+  } catch {
+    // The reminder can still disappear for this session if storage is blocked.
+  }
+}
 
 function makeId(prefix: string) {
   return `${prefix}-${crypto.randomUUID?.() ?? `${Date.now()}-${Math.random()}`}`;
@@ -293,6 +313,9 @@ export default function App() {
   const [exportSettings, setExportSettings] =
     useState<ExportSettings>(DEFAULT_EXPORT);
   const [toasts, setToasts] = useState<Toast[]>([]);
+  const [showGitHubStarReminder, setShowGitHubStarReminder] = useState(
+    () => !hasDismissedGitHubStarReminder(),
+  );
   const [historyVersion, setHistoryVersion] = useState(0);
   const [copiedEditState, setCopiedEditState] = useState<CopiedDevelopSettings | null>(null);
   const [showCopySettings, setShowCopySettings] = useState(false);
@@ -385,6 +408,11 @@ export default function App() {
     (message: string) => notify(message, "error"),
     [notify],
   );
+
+  const dismissGitHubStarReminder = useCallback(() => {
+    rememberGitHubStarReminderDismissal();
+    setShowGitHubStarReminder(false);
+  }, []);
 
   const cycleCropOverlay = useCallback(() => {
     setCropOverlay((current) => {
@@ -2602,6 +2630,31 @@ export default function App() {
             onClose={() => setShowShortcuts(false)}
           />
         </Suspense>
+      ) : null}
+
+      {showGitHubStarReminder ? (
+        <aside className="repo-star-card" aria-label="Support Darkroom on GitHub">
+          <div className="repo-star-card__intro">
+            <div className="repo-star-card__icon" aria-hidden="true">
+              <Star size={16} fill="currentColor" />
+            </div>
+            <div>
+              <strong>Enjoying Darkroom?</strong>
+              <p>A GitHub star helps other photographers find the project.</p>
+            </div>
+          </div>
+          <a
+            className="repo-star-card__link"
+            href={GITHUB_REPO_URL}
+            target="_blank"
+            rel="noreferrer"
+            onClick={dismissGitHubStarReminder}
+          >
+            <span>Star Darkroom on GitHub</span>
+            <ArrowUpRight size={14} aria-hidden="true" />
+          </a>
+          <small>This card disappears when you star the repo.</small>
+        </aside>
       ) : null}
 
       <div className="toast-stack" aria-live="polite">
