@@ -2066,11 +2066,6 @@ export default function App() {
           >
             Develop
           </button>
-          {['Map', 'Book', 'Slideshow', 'Print', 'Web'].map((module) => (
-            <button key={module} type="button" disabled title={`${module} is not available in the browser catalog`}>
-              {module}
-            </button>
-          ))}
         </nav>
         <div className="topbar__actions classic-utilities">
           {activePhoto ? (
@@ -2094,7 +2089,6 @@ export default function App() {
             label="Catalog backup and restore"
             onClick={() => setShowCatalogBackup(true)}
           />
-          <span className="classic-cloud" title="Local browser catalog" aria-label="Local browser catalog">☁</span>
         </div>
       </header>
 
