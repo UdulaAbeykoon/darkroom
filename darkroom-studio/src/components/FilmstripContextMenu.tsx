@@ -40,7 +40,7 @@ function nextMenuButton(
 ) {
   const buttons = Array.from(
     root.querySelectorAll<HTMLButtonElement>(
-      ':scope > .filmstrip-menu__entry > [role="menuitem"]:not(:disabled)',
+      ':scope > .filmstrip-menu__entry > [role^="menuitem"]:not(:disabled)',
     ),
   );
   const index = buttons.indexOf(current as HTMLButtonElement);
@@ -67,7 +67,7 @@ function MenuItems({
     if (event.key === "Home" || event.key === "End") {
       event.preventDefault();
       const buttons = event.currentTarget.querySelectorAll<HTMLButtonElement>(
-        ':scope > .filmstrip-menu__entry > [role="menuitem"]:not(:disabled)',
+        ':scope > .filmstrip-menu__entry > [role^="menuitem"]:not(:disabled)',
       );
       buttons[event.key === "Home" ? 0 : buttons.length - 1]?.focus();
       return;
@@ -78,7 +78,7 @@ function MenuItems({
         ?.querySelector<HTMLDivElement>(":scope > .filmstrip-menu__submenu");
       if (submenu) {
         event.preventDefault();
-        submenu.querySelector<HTMLButtonElement>('[role="menuitem"]:not(:disabled)')?.focus();
+        submenu.querySelector<HTMLButtonElement>('[role^="menuitem"]:not(:disabled)')?.focus();
       }
       return;
     }
@@ -107,7 +107,7 @@ function MenuItems({
           <div className="filmstrip-menu__entry" key={item.id}>
             <button
               type="button"
-              role="menuitem"
+              role={item.checked === undefined ? "menuitem" : "menuitemradio"}
               aria-haspopup={hasChildren ? "menu" : undefined}
               aria-checked={item.checked === undefined ? undefined : item.checked}
               className={item.tone === "danger" ? "is-danger" : undefined}
@@ -137,7 +137,13 @@ function MenuItems({
 
 export default function FilmstripContextMenu({ x, y, label, items, onClose }: Props) {
   const menuRef = useRef<HTMLDivElement>(null);
-  const [position, setPosition] = useState({ left: x, top: y, ready: false });
+  const returnFocusRef = useRef(document.activeElement as HTMLElement | null);
+  const [position, setPosition] = useState({
+    left: x,
+    top: y,
+    opensLeft: false,
+    ready: false,
+  });
 
   useLayoutEffect(() => {
     const menu = menuRef.current;
@@ -152,32 +158,44 @@ export default function FilmstripContextMenu({ x, y, label, items, onClose }: Pr
         VIEWPORT_GUTTER,
         Math.min(y, window.innerHeight - rect.height - VIEWPORT_GUTTER),
       ),
+      opensLeft: x + rect.width + 230 > window.innerWidth - VIEWPORT_GUTTER,
       ready: true,
     });
-    menu.querySelector<HTMLButtonElement>('[role="menuitem"]:not(:disabled)')?.focus();
+    const focusFrame = requestAnimationFrame(() => {
+      menu.querySelector<HTMLButtonElement>('[role^="menuitem"]:not(:disabled)')?.focus();
+    });
+    return () => cancelAnimationFrame(focusFrame);
   }, [x, y]);
 
   useEffect(() => {
     const closeWhenOutside = (event: PointerEvent) => {
       if (!menuRef.current?.contains(event.target as Node)) onClose();
     };
+    const closeOnEscape = (event: globalThis.KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      onClose();
+    };
     const close = () => onClose();
     window.addEventListener("pointerdown", closeWhenOutside, true);
+    window.addEventListener("keydown", closeOnEscape, true);
     window.addEventListener("resize", close);
     window.addEventListener("blur", close);
     window.addEventListener("scroll", close, true);
     return () => {
       window.removeEventListener("pointerdown", closeWhenOutside, true);
+      window.removeEventListener("keydown", closeOnEscape, true);
       window.removeEventListener("resize", close);
       window.removeEventListener("blur", close);
       window.removeEventListener("scroll", close, true);
+      if (returnFocusRef.current?.isConnected) returnFocusRef.current.focus();
     };
   }, [onClose]);
 
   return createPortal(
     <div
       ref={menuRef}
-      className="filmstrip-menu"
+      className={`filmstrip-menu ${position.opensLeft ? "opens-left" : ""}`}
       role="menu"
       aria-label={label}
       style={{

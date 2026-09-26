@@ -110,7 +110,7 @@ export default function Filmstrip({
         <strong>{photos.findIndex((photo) => photo.id === activeId) + 1 || "—"}</strong>
         <span>/ {photos.length}</span>
       </div>
-      <div className="filmstrip__rail" role="listbox">
+      <div className="filmstrip__rail" role="listbox" aria-multiselectable="true">
         {photos.map((photo) => (
           <FilmstripFrame
             key={photo.id}

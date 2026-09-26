@@ -9068,6 +9068,11 @@ button.adjustment-slider__value:hover {
   display: flex;
 }
 
+.filmstrip-menu.opens-left .filmstrip-menu__submenu {
+  right: calc(100% + 3px);
+  left: auto;
+}
+
 @keyframes filmstrip-menu-in {
   from {
     opacity: 0;
