@@ -1679,6 +1679,70 @@ export async function deletePhoto(id: string): Promise<void> {
   }
 }
 
+/** Removes several catalog records in one transaction without touching source files. */
+export async function deletePhotos(ids: readonly string[]): Promise<void> {
+  const uniqueIds = [...new Set(ids.filter((id) => id.trim()))];
+  if (!uniqueIds.length) return;
+
+  try {
+    await flushCatalogWrites();
+    await enqueueCatalogWrite(async () => {
+      const database = await openCatalog();
+      const transaction = database.transaction(PHOTO_STORE, "readwrite");
+      const completed = transactionComplete(transaction);
+      const store = transaction.objectStore(PHOTO_STORE);
+      uniqueIds.forEach((id) => store.delete(id));
+      await completed;
+    });
+    uniqueIds.forEach(revokePhotoUrls);
+  } catch (error) {
+    throw catalogError("Could not remove the photos from the local catalog", error);
+  }
+}
+
+/**
+ * Creates an independent edit recipe that shares the source pixels, matching
+ * Lightroom's virtual-copy behavior while the record is in the browser catalog.
+ */
+export async function createVirtualCopy(id: string): Promise<PhotoRecord> {
+  if (!id.trim()) throw new Error("A photo id is required.");
+
+  try {
+    await flushCatalogWrites();
+    const database = await openCatalog();
+    const transaction = database.transaction(PHOTO_STORE, "readonly");
+    const completed = transactionComplete(transaction);
+    const source = await requestResult<StoredPhoto | undefined>(
+      transaction.objectStore(PHOTO_STORE).get(id),
+    );
+    await completed;
+    if (!source) throw new Error("The source photo is no longer in the catalog.");
+
+    const copyId = makeId("photo");
+    const extensionIndex = source.name.lastIndexOf(".");
+    const baseName = extensionIndex > 0 ? source.name.slice(0, extensionIndex) : source.name;
+    const extension = extensionIndex > 0 ? source.name.slice(extensionIndex) : "";
+    const copy: StoredPhoto = {
+      ...source,
+      id: copyId,
+      name: `${baseName} Copy${extension}`,
+      importedAt: new Date().toISOString(),
+      lastEditedAt: new Date().toISOString(),
+      fingerprint: `${source.contentFingerprint ?? source.fingerprint}:virtual-copy:${copyId}`,
+      metadata: structuredClone(source.metadata),
+      keywords: [...source.keywords],
+      collectionIds: [...source.collectionIds],
+      edits: structuredClone(source.edits),
+      snapshots: structuredClone(source.snapshots),
+    };
+    await enqueueCatalogWrite(() => putStoredPhotos([copy]));
+    return materializePhoto(copy);
+  } catch (error) {
+    if (error instanceof Error && error.message.includes("no longer")) throw error;
+    throw catalogError("Could not create the virtual copy", error);
+  }
+}
+
 /**
  * Explicitly clears Darkroom-owned IndexedDB records. It never touches source
  * files. Nothing calls this automatically.

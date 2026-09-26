@@ -9081,3 +9081,94 @@ button.adjustment-slider__value:hover {
     animation: none;
   }
 }
+
+.develop-workspace.has-reference {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+}
+
+.develop-workspace.has-reference > .reference-stage {
+  grid-row: 1;
+  grid-column: 1;
+}
+
+.develop-workspace.has-reference > .canvas-stage {
+  grid-row: 1;
+  grid-column: 2;
+  border-left: 1px solid #31404b;
+}
+
+.develop-workspace.has-reference > .canvas-toolbar {
+  grid-row: 2;
+  grid-column: 1 / -1;
+}
+
+.reference-stage {
+  position: relative;
+  display: grid;
+  grid-template-rows: 30px minmax(0, 1fr);
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: #0e1318;
+}
+
+.reference-stage__header {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 0 8px;
+  border-bottom: 1px solid #2b3946;
+  color: #8ab4d6;
+  font-size: 10px;
+}
+
+.reference-stage__header strong {
+  overflow: hidden;
+  color: #cbd6de;
+  font-size: 10px;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.reference-stage__header button {
+  padding: 3px 6px;
+  color: #9dabb5;
+  background: transparent;
+  border: 0;
+  font: inherit;
+}
+
+.reference-stage__header button:hover,
+.reference-stage__header button:focus-visible {
+  color: #f3f7fa;
+}
+
+.reference-stage__image {
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  place-items: center;
+  padding: 18px;
+}
+
+.reference-stage__image img {
+  display: block;
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  box-shadow: 0 8px 28px rgb(0 0 0 / 40%);
+}
+
+.filmstrip--small .filmstrip__frame {
+  width: 68px;
+  height: 56px;
+  flex-basis: 68px;
+}
+
+.filmstrip--large .filmstrip__frame {
+  width: 108px;
+  height: 76px;
+  flex-basis: 108px;
+}

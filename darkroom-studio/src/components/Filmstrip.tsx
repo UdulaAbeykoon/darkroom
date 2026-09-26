@@ -93,17 +93,19 @@ export default function Filmstrip({
   selectedIds,
   onActivate,
   onOpenContextMenu,
+  size = "medium",
 }: {
   photos: PhotoRecord[];
   activeId: string | null;
   selectedIds: Set<string>;
   onActivate: (id: string, additive: boolean, range: boolean) => void;
   onOpenContextMenu?: (id: string, x: number, y: number) => void;
+  size?: "small" | "medium" | "large";
 }) {
   if (!photos.length) return null;
 
   return (
-    <div className="filmstrip" aria-label="Filmstrip">
+    <div className={`filmstrip filmstrip--${size}`} aria-label="Filmstrip">
       <div className="filmstrip__count">
         <strong>{photos.findIndex((photo) => photo.id === activeId) + 1 || "—"}</strong>
         <span>/ {photos.length}</span>

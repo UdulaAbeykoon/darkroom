@@ -13,6 +13,8 @@ import {
   Check,
   ChevronDown,
   CircleHelp,
+  Columns2,
+  Copy,
   DatabaseBackup,
   Download,
   Flag,
@@ -21,17 +23,27 @@ import {
   Import,
   LayoutGrid,
   Maximize2,
+  MonitorUp,
+  Palette,
   PanelLeftClose,
   PanelLeftOpen,
+  RotateCcw,
+  RotateCw,
   Search,
+  Share2,
   SlidersHorizontal,
   Star,
+  Tags,
+  Trash2,
   Undo2,
   Redo2,
   X,
 } from "lucide-react";
 import DevelopWorkspace from "./components/DevelopWorkspace";
 import Filmstrip from "./components/Filmstrip";
+import FilmstripContextMenu, {
+  type FilmstripMenuItem,
+} from "./components/FilmstripContextMenu";
 import LeftSidebar from "./components/LeftSidebar";
 import LibraryInspector from "./components/LibraryInspector";
 import LibraryWorkspace from "./components/LibraryWorkspace";
@@ -55,6 +67,8 @@ import {
 } from "./defaults";
 import {
   createCollection,
+  createVirtualCopy,
+  deletePhotos,
   importFiles,
   initializeCatalog,
   exportCatalog,
@@ -85,6 +99,7 @@ import { createSampleFile } from "./lib/sample";
 import type {
   BrushStroke,
   Collection,
+  ColorLabel,
   CropOverlay,
   DevelopPreset,
   EditSnapshot,
@@ -120,6 +135,8 @@ type CopiedDevelopSettings = {
   state: EditState;
   selection: SyncSettingsSelection;
 };
+type FilmstripSize = "small" | "medium" | "large";
+type FilmstripMenuState = { photoId: string; x: number; y: number };
 
 const DEFAULT_EXPORT: ExportSettings = {
   format: "image/jpeg",
@@ -300,6 +317,18 @@ export default function App() {
   const [singleKeyShortcuts, setSingleKeyShortcuts] = useState(true);
   const [showCatalogBackup, setShowCatalogBackup] = useState(false);
   const [showExport, setShowExport] = useState(false);
+  const [filmstripMenu, setFilmstripMenu] = useState<FilmstripMenuState | null>(
+    null,
+  );
+  const [referencePhotoId, setReferencePhotoId] = useState<string | null>(null);
+  const [filmstripSize, setFilmstripSize] = useState<FilmstripSize>(() => {
+    try {
+      const stored = window.localStorage.getItem("darkroom:filmstrip-size");
+      return stored === "small" || stored === "large" ? stored : "medium";
+    } catch {
+      return "medium";
+    }
+  });
   const [exporting, setExporting] = useState(false);
   const [exportProgress, setExportProgress] = useState<{
     current: number;
@@ -329,6 +358,7 @@ export default function App() {
   const lastSelectedRef = useRef<string | null>(null);
   const engineRef = useRef<ImageEngine | null>(null);
   const exportCanceledRef = useRef(false);
+  const copiedMetadataRef = useRef<PhotoRecord["metadata"] | null>(null);
   const presetBaseRef = useRef<{
     photoId: string;
     presetId: string;
@@ -506,6 +536,17 @@ export default function App() {
   const activePhoto = activeId
     ? photoByIdRef.current.get(activeId) ?? null
     : null;
+  const referencePhoto = referencePhotoId
+    ? photoByIdRef.current.get(referencePhotoId) ?? null
+    : null;
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem("darkroom:filmstrip-size", filmstripSize);
+    } catch {
+      // The size still applies for this session when local storage is blocked.
+    }
+  }, [filmstripSize]);
 
   const previewPhoto = useMemo(() => {
     if (!activePhoto || !previewPreset) return activePhoto;
@@ -1112,6 +1153,262 @@ export default function App() {
       }
     },
     [activeId, collections, notify, selectedIds, setPhotosSafe],
+  );
+
+  const openFilmstripMenu = useCallback(
+    (photoId: string, x: number, y: number) => {
+      commitEdit();
+      setActiveId(photoId);
+      setSelectedIds((current) => {
+        if (current.has(photoId)) return current;
+        lastSelectedRef.current = photoId;
+        return new Set([photoId]);
+      });
+      setFilmstripMenu({ photoId, x, y });
+    },
+    [commitEdit],
+  );
+
+  const addTargetsToQuickCollection = useCallback(
+    async (ids: readonly string[]) => {
+      try {
+        let quickCollection = collections.find(
+          (collection) => collection.name.toLowerCase() === "quick collection",
+        );
+        if (!quickCollection) {
+          quickCollection = await createCollection("Quick Collection");
+          setCollections((current) => [...current, quickCollection!]);
+        }
+        const targetIds = new Set(ids);
+        const updated = photosRef.current.flatMap((photo) =>
+          targetIds.has(photo.id) && !photo.collectionIds.includes(quickCollection.id)
+            ? [{ ...photo, collectionIds: [...photo.collectionIds, quickCollection.id] }]
+            : [],
+        );
+        if (!updated.length) {
+          notify("The selected photos are already in Quick Collection.");
+          return;
+        }
+        await savePhotos(updated);
+        const updatedById = new Map(updated.map((photo) => [photo.id, photo]));
+        setPhotosSafe((current) =>
+          current.map((photo) => updatedById.get(photo.id) ?? photo),
+        );
+        notify(
+          `Added ${updated.length} ${updated.length === 1 ? "photo" : "photos"} to Quick Collection.`,
+          "success",
+        );
+      } catch (error) {
+        notify(
+          error instanceof Error ? error.message : "Could not update Quick Collection.",
+          "error",
+        );
+      }
+    },
+    [collections, notify, setPhotosSafe],
+  );
+
+  const addKeywordsToPhotos = useCallback(
+    (ids: readonly string[]) => {
+      const value = window.prompt("Add keywords (separate multiple keywords with commas)");
+      if (value === null) return;
+      const keywords = value
+        .split(/[,;]+/)
+        .map((keyword) => keyword.trim())
+        .filter(Boolean);
+      if (!keywords.length) return;
+      updatePhotos(
+        ids,
+        (photo) => ({
+          ...photo,
+          keywords: [...new Set([...photo.keywords, ...keywords])],
+        }),
+        true,
+      );
+      notify(
+        `Added ${keywords.length} ${keywords.length === 1 ? "keyword" : "keywords"}.`,
+        "success",
+      );
+    },
+    [notify, updatePhotos],
+  );
+
+  const rotatePhotos = useCallback(
+    (ids: readonly string[], degrees: number) => {
+      const editedAt = new Date().toISOString();
+      ids.forEach((id) => {
+        const photo = photoByIdRef.current.get(id);
+        if (!photo) return;
+        const history = historiesRef.current.get(id) ?? { past: [], future: [] };
+        history.past.push(photo.edits);
+        if (history.past.length > 100) history.past.shift();
+        history.future = [];
+        historiesRef.current.set(id, history);
+      });
+      updatePhotos(
+        ids,
+        (photo) => ({
+          ...photo,
+          lastEditedAt: editedAt,
+          edits: {
+            ...photo.edits,
+            crop: {
+              ...photo.edits.crop,
+              angle: ((photo.edits.crop.angle + degrees + 180) % 360) - 180,
+            },
+          },
+        }),
+        true,
+        false,
+      );
+      setHistoryVersion((version) => version + 1);
+    },
+    [updatePhotos],
+  );
+
+  const createContextVirtualCopy = useCallback(
+    async (photoId: string) => {
+      try {
+        const copy = await createVirtualCopy(photoId);
+        setPhotosSafe((current) => [copy, ...current]);
+        setActiveId(copy.id);
+        setSelectedIds(new Set([copy.id]));
+        lastSelectedRef.current = copy.id;
+        notify(`Created virtual copy ${copy.name}.`, "success");
+      } catch (error) {
+        notify(
+          error instanceof Error ? error.message : "Could not create the virtual copy.",
+          "error",
+        );
+      }
+    },
+    [notify, setPhotosSafe],
+  );
+
+  const downloadOriginal = useCallback((photo: PhotoRecord) => {
+    const url = URL.createObjectURL(photo.blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = photo.name;
+    anchor.click();
+    window.setTimeout(() => URL.revokeObjectURL(url), 30_000);
+    notify(`Original download requested for ${photo.name}.`, "success");
+  }, [notify]);
+
+  const sharePhoto = useCallback(
+    async (photo: PhotoRecord) => {
+      const file = new File([photo.blob], photo.name, {
+        type: photo.type || photo.blob.type || "application/octet-stream",
+      });
+      if (navigator.share && (!navigator.canShare || navigator.canShare({ files: [file] }))) {
+        try {
+          await navigator.share({ files: [file], title: photo.name });
+          return;
+        } catch (error) {
+          if (error instanceof DOMException && error.name === "AbortError") return;
+        }
+      }
+      downloadOriginal(photo);
+      window.location.href = `mailto:?subject=${encodeURIComponent(photo.name)}`;
+      notify("Your mail app was opened; attach the downloaded original to the message.");
+    },
+    [downloadOriginal, notify],
+  );
+
+  const openOnSecondDisplay = useCallback(
+    (photo: PhotoRecord) => {
+      const popup = window.open(
+        "",
+        "darkroom-secondary-display",
+        "popup=yes,width=1280,height=900",
+      );
+      if (!popup) {
+        notify("Allow pop-ups to open the photograph on a second display.", "error");
+        return;
+      }
+      popup.document.title = `${photo.name} — Darkroom secondary display`;
+      popup.document.body.replaceChildren();
+      Object.assign(popup.document.body.style, {
+        margin: "0",
+        display: "grid",
+        placeItems: "center",
+        minHeight: "100vh",
+        background: "#090c0f",
+        color: "#d9e2ea",
+        fontFamily: "system-ui, sans-serif",
+      });
+      const status = popup.document.createElement("p");
+      status.textContent = `Rendering ${photo.name}…`;
+      popup.document.body.append(status);
+
+      const controller = new ImageEngine(document.createElement("canvas"));
+      void controller
+        .export(renderBlobForPhoto(photo), photo.edits, {
+          ...DEFAULT_EXPORT,
+          format: "image/jpeg",
+          resizeMode: "long-edge",
+          longEdge: 2560,
+          watermarkEnabled: false,
+        })
+        .then((blob) => {
+          if (popup.closed) return;
+          const url = URL.createObjectURL(blob);
+          const image = popup.document.createElement("img");
+          image.src = url;
+          image.alt = photo.name;
+          Object.assign(image.style, {
+            display: "block",
+            maxWidth: "100vw",
+            maxHeight: "100vh",
+            objectFit: "contain",
+          });
+          popup.document.body.replaceChildren(image);
+          popup.addEventListener("beforeunload", () => URL.revokeObjectURL(url), {
+            once: true,
+          });
+        })
+        .catch((error) => {
+          status.textContent =
+            error instanceof Error ? error.message : "The preview could not be rendered.";
+        })
+        .finally(() => controller.destroy());
+    },
+    [notify],
+  );
+
+  const removeContextPhotos = useCallback(
+    async (ids: readonly string[]) => {
+      const count = ids.length;
+      if (!count) return;
+      const confirmed = window.confirm(
+        `Remove ${count === 1 ? "this photo" : `these ${count} photos`} from the Darkroom catalog? The original files will not be deleted.`,
+      );
+      if (!confirmed) return;
+      try {
+        await deletePhotos(ids);
+        const removed = new Set(ids);
+        const remaining = photosRef.current.filter((photo) => !removed.has(photo.id));
+        setPhotosSafe(remaining);
+        const nextActive = removed.has(activeId ?? "")
+          ? remaining[0]?.id ?? null
+          : activeId;
+        setActiveId(nextActive);
+        setSelectedIds(nextActive ? new Set([nextActive]) : new Set());
+        if (referencePhotoId && removed.has(referencePhotoId)) {
+          setReferencePhotoId(null);
+        }
+        notify(
+          `Removed ${count} ${count === 1 ? "photo" : "photos"} from the catalog.`,
+          "success",
+        );
+      } catch (error) {
+        notify(
+          error instanceof Error ? error.message : "Could not remove the photos.",
+          "error",
+        );
+      }
+    },
+    [activeId, notify, referencePhotoId, setPhotosSafe],
   );
 
   const downloadCatalogBackup = useCallback(async () => {
@@ -2000,6 +2297,283 @@ export default function App() {
               : collections.find((collection) => `collection:${collection.id}` === source)
                   ?.name ?? "Catalog";
 
+  const contextPhoto = filmstripMenu
+    ? photoByIdRef.current.get(filmstripMenu.photoId) ?? null
+    : null;
+  const contextTargetIds = contextPhoto
+    ? selectedIds.has(contextPhoto.id)
+      ? [...selectedIds]
+      : [contextPhoto.id]
+    : [];
+  const contextCollections = contextPhoto
+    ? collections.filter((collection) =>
+        contextPhoto.collectionIds.includes(collection.id),
+      )
+    : [];
+  const contextMenuItems: FilmstripMenuItem[] = contextPhoto
+    ? [
+        {
+          id: "reference",
+          type: "item",
+          label: "Set as Reference Photo",
+          icon: Columns2,
+          checked: referencePhotoId === contextPhoto.id,
+          onSelect: () => {
+            setReferencePhotoId(contextPhoto.id);
+            setMode("develop");
+            setTool("edit");
+          },
+        },
+        {
+          id: "second-display",
+          type: "item",
+          label: "Lock to Second Display",
+          icon: MonitorUp,
+          onSelect: () => openOnSecondDisplay(contextPhoto),
+        },
+        {
+          id: "show-library",
+          type: "item",
+          label: "Show in Library",
+          onSelect: () => {
+            setSource("all");
+            setMode("library");
+            setLibraryView("photo-grid");
+          },
+        },
+        ...(contextCollections.length
+          ? [
+              {
+                id: "go-collection",
+                type: "item" as const,
+                label: "Go to Collection",
+                children: contextCollections.map((collection) => ({
+                  id: `collection-${collection.id}`,
+                  type: "item" as const,
+                  label: collection.name,
+                  onSelect: () => {
+                    setSource(`collection:${collection.id}`);
+                    setMode("library");
+                    setLibraryView("photo-grid");
+                  },
+                })),
+              },
+            ]
+          : []),
+        { id: "organize-separator", type: "separator" },
+        {
+          id: "flag",
+          type: "item",
+          label: "Set Flag",
+          icon: Flag,
+          children: [
+            ["pick", "Flagged", "P"],
+            ["unflagged", "Unflagged", "U"],
+            ["reject", "Rejected", "X"],
+          ].map(([flag, label, shortcut]) => ({
+            id: `flag-${flag}`,
+            type: "item" as const,
+            label,
+            shortcut,
+            checked: contextPhoto.flag === flag,
+            onSelect: () => setFlag(flag as FlagState),
+          })),
+        },
+        {
+          id: "rating",
+          type: "item",
+          label: "Set Rating",
+          icon: Star,
+          children: Array.from({ length: 6 }, (_, rating) => ({
+            id: `rating-${rating}`,
+            type: "item" as const,
+            label: rating ? `${rating} Star${rating === 1 ? "" : "s"}` : "None",
+            shortcut: String(rating),
+            checked: contextPhoto.rating === rating,
+            onSelect: () => setRating(rating),
+          })),
+        },
+        {
+          id: "color-label",
+          type: "item",
+          label: "Set Color Label",
+          icon: Palette,
+          children: (["red", "yellow", "green", "blue", "purple", "none"] as ColorLabel[]).map(
+            (color) => ({
+              id: `color-${color}`,
+              type: "item" as const,
+              label: color === "none" ? "None" : `${color[0].toUpperCase()}${color.slice(1)}`,
+              checked: contextPhoto.colorLabel === color,
+              onSelect: () =>
+                updatePhotos(
+                  contextTargetIds,
+                  (photo) => ({ ...photo, colorLabel: color }),
+                  true,
+                ),
+            }),
+          ),
+        },
+        {
+          id: "keywords",
+          type: "item",
+          label: "Add Keywords…",
+          icon: Tags,
+          onSelect: () => addKeywordsToPhotos(contextTargetIds),
+        },
+        {
+          id: "quick-collection",
+          type: "item",
+          label: "Add to Quick Collection",
+          shortcut: "B",
+          onSelect: () => void addTargetsToQuickCollection(contextTargetIds),
+        },
+        { id: "copy-separator", type: "separator" },
+        {
+          id: "virtual-copy",
+          type: "item",
+          label: "Create Virtual Copy",
+          icon: Copy,
+          onSelect: () => void createContextVirtualCopy(contextPhoto.id),
+        },
+        {
+          id: "develop-settings",
+          type: "item",
+          label: "Develop Settings",
+          icon: SlidersHorizontal,
+          children: [
+            {
+              id: "copy-settings",
+              type: "item",
+              label: "Copy Settings…",
+              onSelect: copyDevelopSettings,
+            },
+            {
+              id: "paste-settings",
+              type: "item",
+              label: "Paste Settings",
+              disabled: !copiedEditState,
+              onSelect: pasteDevelopSettings,
+            },
+            { id: "develop-separator", type: "separator" },
+            ...BUILT_IN_PRESETS.map((preset) => ({
+              id: `preset-${preset.id}`,
+              type: "item" as const,
+              label: `Apply ${preset.name}`,
+              onSelect: () => applyPreset(preset),
+            })),
+            { id: "reset-separator", type: "separator" },
+            {
+              id: "reset-settings",
+              type: "item",
+              label: "Reset Develop Settings",
+              onSelect: resetEdits,
+            },
+          ],
+        },
+        { id: "transform-separator", type: "separator" },
+        {
+          id: "rotate-left",
+          type: "item",
+          label: "Rotate Left (CCW)",
+          icon: RotateCcw,
+          onSelect: () => rotatePhotos(contextTargetIds, -90),
+        },
+        {
+          id: "rotate-right",
+          type: "item",
+          label: "Rotate Right (CW)",
+          icon: RotateCw,
+          onSelect: () => rotatePhotos(contextTargetIds, 90),
+        },
+        {
+          id: "metadata",
+          type: "item",
+          label: "Metadata",
+          children: [
+            {
+              id: "copy-metadata",
+              type: "item",
+              label: "Copy Metadata",
+              onSelect: () => {
+                copiedMetadataRef.current = structuredClone(contextPhoto.metadata);
+                notify(`Metadata copied from ${contextPhoto.name}.`, "success");
+              },
+            },
+            {
+              id: "paste-metadata",
+              type: "item",
+              label: "Paste Metadata",
+              disabled: !copiedMetadataRef.current,
+              onSelect: () => {
+                const metadata = copiedMetadataRef.current;
+                if (!metadata) return;
+                updatePhotos(
+                  contextTargetIds,
+                  (photo) => ({ ...photo, metadata: structuredClone(metadata) }),
+                  true,
+                );
+                notify("Metadata pasted.", "success");
+              },
+            },
+            {
+              id: "show-metadata",
+              type: "item",
+              label: "Show Metadata Panel",
+              onSelect: () => {
+                setMode("library");
+                setLibraryView("detail");
+                setPanelsVisible(true);
+              },
+            },
+          ],
+        },
+        { id: "output-separator", type: "separator" },
+        {
+          id: "export",
+          type: "item",
+          label: contextTargetIds.length > 1 ? `Export ${contextTargetIds.length} Photos…` : "Export…",
+          icon: Download,
+          shortcut: "⌘⇧E",
+          onSelect: () => setShowExport(true),
+        },
+        {
+          id: "share",
+          type: "item",
+          label: "Share Photo…",
+          icon: Share2,
+          disabled: contextTargetIds.length > 1,
+          onSelect: () => void sharePhoto(contextPhoto),
+        },
+        {
+          id: "download-original",
+          type: "item",
+          label: "Download Original…",
+          onSelect: () => downloadOriginal(contextPhoto),
+        },
+        { id: "remove-separator", type: "separator" },
+        {
+          id: "remove",
+          type: "item",
+          label: contextTargetIds.length > 1 ? "Remove Photos…" : "Remove Photo…",
+          icon: Trash2,
+          tone: "danger",
+          onSelect: () => void removeContextPhotos(contextTargetIds),
+        },
+        {
+          id: "view-options",
+          type: "item",
+          label: "View Options",
+          children: (["small", "medium", "large"] as FilmstripSize[]).map((size) => ({
+            id: `size-${size}`,
+            type: "item" as const,
+            label: `${size[0].toUpperCase()}${size.slice(1)} Thumbnails`,
+            checked: filmstripSize === size,
+            onSelect: () => setFilmstripSize(size),
+          })),
+        },
+      ]
+    : [];
+
   return (
     <div
       className={`app-shell ${panelsVisible ? "" : "panels-hidden"}`}
@@ -2252,6 +2826,7 @@ export default function App() {
           ) : activePhoto ? (
             <DevelopWorkspace
               photo={previewPhoto ?? activePhoto}
+              referencePhoto={referencePhoto}
               tool={tool}
               cropOverlay={cropOverlay}
               activeMaskId={activeMaskId}
@@ -2275,6 +2850,7 @@ export default function App() {
               }}
               onToggleOriginal={() => setShowOriginal((visible) => !visible)}
               onToggleMaskOverlay={() => setShowMaskOverlay((visible) => !visible)}
+              onClearReference={() => setReferencePhotoId(null)}
               onBeginEdit={beginEdit}
               onCommitEdit={commitEdit}
               onAppendBrushStroke={appendBrushStroke}
@@ -2449,6 +3025,18 @@ export default function App() {
           activeId={activeId}
           selectedIds={selectedIds}
           onActivate={selectPhoto}
+          onOpenContextMenu={openFilmstripMenu}
+          size={filmstripSize}
+        />
+      ) : null}
+
+      {filmstripMenu && contextPhoto ? (
+        <FilmstripContextMenu
+          x={filmstripMenu.x}
+          y={filmstripMenu.y}
+          label={`Actions for ${contextPhoto.name}`}
+          items={contextMenuItems}
+          onClose={() => setFilmstripMenu(null)}
         />
       ) : null}
 
