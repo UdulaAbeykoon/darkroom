@@ -3196,15 +3196,6 @@ body {
   display: none;
 }
 
-.classic-cloud {
-  display: grid;
-  width: 25px;
-  height: 25px;
-  place-items: center;
-  color: #cfcfcf;
-  font-size: 13px;
-}
-
 .workspace {
   background: #222;
 }
@@ -3452,8 +3443,7 @@ input[type="range"] {
     grid-template-columns: 190px minmax(380px, 1fr) auto;
   }
 
-  .classic-identity__text,
-  .classic-module-bar .mode-switcher button:nth-last-child(-n + 3) {
+  .classic-identity__text {
     display: none;
   }
 }
