@@ -16,6 +16,7 @@ import {
   useState,
 } from "react";
 import { ImageEngine, type RenderOptions } from "../lib/imageEngine";
+import { useDevelopedPreview } from "../hooks/useDevelopedPreview";
 import { constrainGradientPoint, radialLocalPoint, radialPoint, linearMetrics, linearFromCenter } from "../lib/maskGeometry";
 import { getMaskComponents } from "../lib/maskMath";
 import { renderBlobForPhoto } from "../lib/rawImage";
@@ -41,6 +42,7 @@ import { IconButton } from "./ui";
 
 type Props = {
   photo: PhotoRecord;
+  referencePhoto?: PhotoRecord | null;
   tool: EditorTool;
   cropOverlay: CropOverlay;
   activeMaskId: string | null;
@@ -84,6 +86,7 @@ type Props = {
   onAddUprightGuide: (guide: UprightGuide) => void;
   onCropChange: (crop: CropState) => void;
   onError: (message: string) => void;
+  onClearReference?: () => void;
 };
 
 type LinearMaskGeometry = NonNullable<MaskComponent["linear"]>;
@@ -497,6 +500,10 @@ export default function DevelopWorkspace(props: Props) {
   const cropUpdateFrameRef = useRef<number | null>(null);
   const pendingCropUpdateRef = useRef<CropState | null>(null);
   const renderRef = useRef<() => void>(() => {});
+  const referencePreview = useDevelopedPreview(props.referencePhoto ?? photo, 1600, {
+    eager: true,
+    fallbackUrl: props.referencePhoto?.objectUrl ?? photo.objectUrl,
+  });
 
   const activeMaskGroup = useMemo(
     () => photo.edits.masks.find((mask) => mask.id === activeMaskId) ?? null,
@@ -1882,7 +1889,26 @@ export default function DevelopWorkspace(props: Props) {
 
 
   return (
-    <main className="develop-workspace">
+    <main className={`develop-workspace ${props.referencePhoto ? "has-reference" : ""}`}>
+      {props.referencePhoto ? (
+        <aside className="reference-stage" aria-label={`Reference photo ${props.referencePhoto.name}`}>
+          <div className="reference-stage__header">
+            <span>Reference</span>
+            <strong title={props.referencePhoto.name}>{props.referencePhoto.name}</strong>
+            <button type="button" onClick={props.onClearReference} aria-label="Close Reference View">
+              Close
+            </button>
+          </div>
+          <div className="reference-stage__image">
+            <img
+              ref={referencePreview.imageRef}
+              src={referencePreview.src}
+              alt={props.referencePhoto.name}
+              draggable={false}
+            />
+          </div>
+        </aside>
+      ) : null}
       <div
         ref={stageRef}
         tabIndex={-1}

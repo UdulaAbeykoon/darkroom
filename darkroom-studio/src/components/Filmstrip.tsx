@@ -8,11 +8,13 @@ const FilmstripFrame = memo(function FilmstripFrame({
   active,
   selected,
   onActivate,
+  onOpenContextMenu,
 }: {
   photo: PhotoRecord;
   active: boolean;
   selected: boolean;
   onActivate: (id: string, additive: boolean, range: boolean) => void;
+  onOpenContextMenu?: (id: string, x: number, y: number) => void;
 }) {
   const preview = useDevelopedPreview(photo, 640, {
     fallbackUrl: photo.thumbnailUrl,
@@ -32,6 +34,11 @@ const FilmstripFrame = memo(function FilmstripFrame({
       onClick={(event) =>
         onActivate(photo.id, event.metaKey || event.ctrlKey, event.shiftKey)
       }
+      onContextMenu={(event) => {
+        if (!onOpenContextMenu) return;
+        event.preventDefault();
+        onOpenContextMenu(photo.id, event.clientX, event.clientY);
+      }}
       onKeyDown={(event) => {
         if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) {
           return;
@@ -85,21 +92,25 @@ export default function Filmstrip({
   activeId,
   selectedIds,
   onActivate,
+  onOpenContextMenu,
+  size = "medium",
 }: {
   photos: PhotoRecord[];
   activeId: string | null;
   selectedIds: Set<string>;
   onActivate: (id: string, additive: boolean, range: boolean) => void;
+  onOpenContextMenu?: (id: string, x: number, y: number) => void;
+  size?: "small" | "medium" | "large";
 }) {
   if (!photos.length) return null;
 
   return (
-    <div className="filmstrip" aria-label="Filmstrip">
+    <div className={`filmstrip filmstrip--${size}`} aria-label="Filmstrip">
       <div className="filmstrip__count">
         <strong>{photos.findIndex((photo) => photo.id === activeId) + 1 || "—"}</strong>
         <span>/ {photos.length}</span>
       </div>
-      <div className="filmstrip__rail" role="listbox">
+      <div className="filmstrip__rail" role="listbox" aria-multiselectable="true">
         {photos.map((photo) => (
           <FilmstripFrame
             key={photo.id}
@@ -107,6 +118,7 @@ export default function Filmstrip({
             active={photo.id === activeId}
             selected={selectedIds.has(photo.id)}
             onActivate={onActivate}
+            onOpenContextMenu={onOpenContextMenu}
           />
         ))}
       </div>
