@@ -341,7 +341,25 @@ export async function decodeCameraRaw(file: Blob): Promise<DecodedCameraRaw> {
       userQual: 3,
     });
 
-    const metadata = await decoder.metadata(false).catch(() => undefined);
+    const basicMetadata = await decoder.metadata(false).catch(() => undefined);
+    const metadata = validText(basicMetadata?.camera_make)
+      ?.toLowerCase()
+      .includes("nikon")
+      ? await decoder.metadata(true).catch(() => basicMetadata)
+      : basicMetadata;
+    if (NIKON_HIGH_EFFICIENCY_COMPRESSION.has(
+      metadata?.nikon?.NEFCompression ?? -1,
+    )) {
+      const thumbnail = await decoder.thumbnailData().catch(() => undefined);
+      const preview = highEfficiencyNefPreview(metadata, thumbnail);
+      if (preview) {
+        return {
+          ...preview,
+          metadata: metadataFromRaw(metadata),
+        };
+      }
+    }
+
     const image = await decoder.imageData();
     if (!image) throw new Error("The RAW decoder returned no image pixels.");
     const pixels = rawPixelsToRgba(image);
