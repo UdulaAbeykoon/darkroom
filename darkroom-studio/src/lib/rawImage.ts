@@ -1,12 +1,15 @@
 import type {
   LibRawImageData,
   LibRawMetadata,
+  LibRawThumbnailData,
 } from "libraw-wasm";
 import type { PhotoMetadata, PhotoRecord } from "../types";
 
 const MEBIBYTE = 1024 * 1024;
 const HALF_SIZE_THRESHOLD_BYTES = 48 * MEBIBYTE;
 const MAX_DECODED_PIXELS = 50_000_000;
+const FULL_SIZE_PREVIEW_RATIO = 0.8;
+const NIKON_HIGH_EFFICIENCY_COMPRESSION = new Set([13, 14]);
 
 const RAW_MIME_BY_EXTENSION: Readonly<Record<string, string>> = {
   "3fr": "image/x-hasselblad-3fr",
@@ -63,6 +66,12 @@ export interface DecodedCameraRaw {
   width: number;
   height: number;
   metadata: PhotoMetadata;
+}
+
+interface EmbeddedRawPreview {
+  blob: Blob;
+  width: number;
+  height: number;
 }
 
 function extensionOf(name: string): string {
@@ -160,6 +169,52 @@ function metadataFromRaw(metadata: LibRawMetadata | undefined): PhotoMetadata {
     longitude: gpsCoordinate(gps?.longitude, gps?.longref),
     copyright: validText(metadata.artist),
     caption: validText(metadata.desc),
+  };
+}
+
+/**
+ * Nikon HE/HE* NEFs use a proprietary compression that this LibRaw WASM build
+ * cannot demosaic reliably. Those files carry a full-resolution, oriented JPEG
+ * specifically for compatible viewers, so use it as the editable render proxy.
+ */
+export function highEfficiencyNefPreview(
+  metadata: LibRawMetadata | undefined,
+  thumbnail: LibRawThumbnailData | undefined,
+): EmbeddedRawPreview | undefined {
+  if (
+    !metadata ||
+    !validText(metadata.camera_make)?.toLowerCase().includes("nikon") ||
+    !NIKON_HIGH_EFFICIENCY_COMPRESSION.has(
+      metadata.nikon?.NEFCompression ?? -1,
+    ) ||
+    !thumbnail ||
+    thumbnail.format !== "jpeg" ||
+    thumbnail.data.length < 2 ||
+    thumbnail.data[0] !== 0xff ||
+    thumbnail.data[1] !== 0xd8
+  ) {
+    return undefined;
+  }
+
+  const rawPixels = metadata.width * metadata.height;
+  const previewPixels = thumbnail.width * thumbnail.height;
+  if (
+    !Number.isSafeInteger(rawPixels) ||
+    !Number.isSafeInteger(previewPixels) ||
+    rawPixels <= 0 ||
+    previewPixels < rawPixels * FULL_SIZE_PREVIEW_RATIO
+  ) {
+    return undefined;
+  }
+
+  const swapsAxes =
+    metadata.flip === 5 || metadata.flip === 6 || metadata.flip === 7;
+  const jpeg = new Uint8Array(new ArrayBuffer(thumbnail.data.byteLength));
+  jpeg.set(thumbnail.data);
+  return {
+    blob: new Blob([jpeg], { type: "image/jpeg" }),
+    width: swapsAxes ? thumbnail.height : thumbnail.width,
+    height: swapsAxes ? thumbnail.width : thumbnail.height,
   };
 }
 
@@ -286,7 +341,25 @@ export async function decodeCameraRaw(file: Blob): Promise<DecodedCameraRaw> {
       userQual: 3,
     });
 
-    const metadata = await decoder.metadata(false).catch(() => undefined);
+    const basicMetadata = await decoder.metadata(false).catch(() => undefined);
+    const metadata = validText(basicMetadata?.camera_make)
+      ?.toLowerCase()
+      .includes("nikon")
+      ? await decoder.metadata(true).catch(() => basicMetadata)
+      : basicMetadata;
+    if (NIKON_HIGH_EFFICIENCY_COMPRESSION.has(
+      metadata?.nikon?.NEFCompression ?? -1,
+    )) {
+      const thumbnail = await decoder.thumbnailData().catch(() => undefined);
+      const preview = highEfficiencyNefPreview(metadata, thumbnail);
+      if (preview) {
+        return {
+          ...preview,
+          metadata: metadataFromRaw(metadata),
+        };
+      }
+    }
+
     const image = await decoder.imageData();
     if (!image) throw new Error("The RAW decoder returned no image pixels.");
     const pixels = rawPixelsToRgba(image);

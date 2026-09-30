@@ -1,8 +1,13 @@
 import { describe, expect, it } from "vitest";
-import type { LibRawImageData } from "libraw-wasm";
+import type {
+  LibRawImageData,
+  LibRawMetadata,
+  LibRawThumbnailData,
+} from "libraw-wasm";
 import {
   CAMERA_RAW_ACCEPT,
   cameraRawInfo,
+  highEfficiencyNefPreview,
   isCameraRawFile,
   rawPixelsToRgba,
   renderBlobForPhoto,
@@ -59,6 +64,64 @@ describe("RAW render source routing", () => {
     const renderBlob = new Blob(["jpeg-working-image"], { type: "image/jpeg" });
     expect(renderBlobForPhoto({ blob: original, renderBlob })).toBe(renderBlob);
     expect(renderBlobForPhoto({ blob: original })).toBe(original);
+  });
+});
+
+describe("Nikon high-efficiency NEF fallback", () => {
+  const metadata = {
+    camera_make: "NIKON CORPORATION",
+    width: 4_040,
+    height: 6_064,
+    flip: 5,
+    nikon: { NEFCompression: 13 },
+  } as LibRawMetadata;
+  const thumbnail = {
+    width: 6_048,
+    height: 4_032,
+    format: "jpeg",
+    data: new Uint8Array([0xff, 0xd8, 0xff, 0xd9]),
+  } satisfies LibRawThumbnailData;
+
+  it.each([13, 14])(
+    "uses the full-size embedded JPEG for Nikon compression %i",
+    (compression) => {
+      const preview = highEfficiencyNefPreview(
+        {
+          ...metadata,
+          nikon: { ...metadata.nikon, NEFCompression: compression },
+        },
+        thumbnail,
+      );
+
+      expect(preview).toMatchObject({ width: 4_032, height: 6_048 });
+      expect(preview?.blob.type).toBe("image/jpeg");
+      expect(preview?.blob.size).toBe(thumbnail.data.length);
+    },
+  );
+
+  it("keeps normal Nikon NEFs on the LibRaw demosaic path", () => {
+    expect(
+      highEfficiencyNefPreview(
+        { ...metadata, nikon: { ...metadata.nikon, NEFCompression: 3 } },
+        thumbnail,
+      ),
+    ).toBeUndefined();
+  });
+
+  it("rejects small or malformed embedded previews", () => {
+    expect(
+      highEfficiencyNefPreview(metadata, {
+        ...thumbnail,
+        width: 160,
+        height: 120,
+      }),
+    ).toBeUndefined();
+    expect(
+      highEfficiencyNefPreview(metadata, {
+        ...thumbnail,
+        data: new Uint8Array([0, 0, 0, 0]),
+      }),
+    ).toBeUndefined();
   });
 });
 
