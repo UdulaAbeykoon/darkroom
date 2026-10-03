@@ -349,6 +349,12 @@ export interface ImportOptions {
   collectionId: string | null;
 }
 
+export interface ImportBatch {
+  id: string;
+  importedAt: string;
+  label?: string;
+}
+
 export interface PhotoRecord {
   id: string;
   name: string;
@@ -357,6 +363,8 @@ export interface PhotoRecord {
   width: number;
   height: number;
   importedAt: string;
+  /** Shared by all photographs accepted by one import operation. */
+  importBatch?: ImportBatch;
   lastEditedAt?: string;
   importMethod?: ImportMethod;
   /** Browser-decodable working image when `blob` is a camera RAW original. */

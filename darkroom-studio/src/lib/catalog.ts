@@ -1,5 +1,6 @@
 import { canonicalProfileName, createDefaultEditState } from "../defaults";
 import { normalizeMasks } from "./maskMath";
+import { normalizeImportBatch } from "./importHistory";
 import {
   cameraRawInfo,
   decodeCameraRaw,
@@ -12,6 +13,7 @@ import type {
   EditState,
   FlagState,
   ImportOptions,
+  ImportBatch,
   PhotoMetadata,
   PhotoRecord,
 } from "../types";
@@ -42,6 +44,7 @@ interface ExportedPhoto {
   width: number;
   height: number;
   importedAt: string;
+  importBatch?: ImportBatch;
   lastEditedAt?: string;
   lastModified: number;
   fingerprint: string;
@@ -159,6 +162,7 @@ let databasePromise: Promise<IDBDatabase> | undefined;
 let catalogMigrationPromise: Promise<void> | undefined;
 let persistenceRequest: Promise<boolean> | undefined;
 let catalogWriteQueue: Promise<void> = Promise.resolve();
+let catalogGeneration = 0;
 let pendingSaveTimer: ReturnType<typeof setTimeout> | undefined;
 const pendingPhotoSaves = new Map<
   string,
@@ -931,7 +935,10 @@ async function getStoredContentFingerprints(): Promise<Set<string>> {
   }
 }
 
-async function putStoredPhotos(records: StoredPhoto[]): Promise<void> {
+async function putStoredPhotos(
+  records: StoredPhoto[],
+  updateExistingOnly = false,
+): Promise<void> {
   if (records.length === 0) return;
 
   try {
@@ -940,7 +947,18 @@ async function putStoredPhotos(records: StoredPhoto[]): Promise<void> {
     const completed = transactionComplete(transaction);
     const store = transaction.objectStore(PHOTO_STORE);
 
-    for (const record of records) store.put(record);
+    for (const record of records) {
+      if (!updateExistingOnly) {
+        store.put(record);
+        continue;
+      }
+      // Check existence in the same write transaction, including browsers
+      // without Web Locks where another tab can delete after our earlier read.
+      const existingKey = store.getKey(record.id);
+      existingKey.onsuccess = () => {
+        if (existingKey.result !== undefined) store.put(record);
+      };
+    }
     await completed;
   } catch (error) {
     if (
@@ -1390,6 +1408,11 @@ export async function importFiles(
   optionsOrProgress: Partial<ImportOptions> | ImportProgressCallback = {},
   progressCallback?: ImportProgressCallback,
 ): Promise<FileImportResult> {
+  const generation = catalogGeneration;
+  const importBatch: ImportBatch = {
+    id: makeId("import"),
+    importedAt: new Date().toISOString(),
+  };
   await initialize();
 
   const options = normalizeImportOptions(
@@ -1416,6 +1439,9 @@ export async function importFiles(
     let rejectionReason: string | undefined;
 
     try {
+      if (generation !== catalogGeneration) {
+        throw new Error("Import stopped because the catalog was emptied.");
+      }
       if (!(file instanceof File)) {
         throw new Error("The selected item is not a browser File object.");
       }
@@ -1446,7 +1472,7 @@ export async function importFiles(
         readMetadata(file),
       ]);
       const metadata = mergeDefinedMetadata(decoded.metadata, parsedMetadata);
-      const importedAt = new Date().toISOString();
+      const importedAt = importBatch.importedAt;
       const id = makeId("photo");
       const fingerprint = duplicate
         ? `${sourceFingerprint}:included-duplicate:${id}`
@@ -1463,6 +1489,7 @@ export async function importFiles(
         width: decoded.width,
         height: decoded.height,
         importedAt,
+        importBatch,
         importMethod: options.method,
         blob: catalogBlob,
         renderBlob: decoded.renderBlob,
@@ -1480,7 +1507,12 @@ export async function importFiles(
         snapshots: [],
       };
 
-      await enqueueCatalogWrite(() => putStoredPhotos([storedPhoto]));
+      await enqueueCatalogWrite(async () => {
+        if (generation !== catalogGeneration) {
+          throw new Error("Import stopped because the catalog was emptied.");
+        }
+        await putStoredPhotos([storedPhoto]);
+      });
       contentFingerprints.add(sourceFingerprint);
       imported.push(materializePhoto(storedPhoto));
     } catch (error) {
@@ -1497,7 +1529,10 @@ export async function importFiles(
     });
   }
 
-  return { photos: imported, rejected };
+  return {
+    photos: generation === catalogGeneration ? imported : [],
+    rejected,
+  };
 }
 
 async function storedPhotoFromPublic(
@@ -1540,6 +1575,9 @@ async function storedPhotoFromPublic(
     width: photo.width,
     height: photo.height,
     importedAt: photo.importedAt,
+    importBatch:
+      normalizeImportBatch(photo.importBatch) ??
+      normalizeImportBatch(existing?.importBatch),
     lastEditedAt: photo.lastEditedAt,
     importMethod: photo.importMethod ?? existing?.importMethod,
     blob: photo.blob,
@@ -1570,14 +1608,15 @@ async function writePhotosNow(photos: readonly PhotoRecord[]): Promise<void> {
   const latestById = new Map(photos.map((photo) => [photo.id, photo]));
 
   await enqueueCatalogWrite(async () => {
-    // A normal edit now reads only the record being changed. The previous
-    // implementation loaded every full-resolution Blob on every slider commit.
+    // Edits update existing records only. A delayed save from this or another
+    // tab must not recreate photos removed while the save was waiting.
     const existing = await getStoredPhotosByIds([...latestById.keys()]);
     const records: StoredPhoto[] = [];
     for (const photo of latestById.values()) {
-      records.push(await storedPhotoFromPublic(photo, existing.get(photo.id)));
+      const stored = existing.get(photo.id);
+      if (stored) records.push(await storedPhotoFromPublic(photo, stored));
     }
-    await putStoredPhotos(records);
+    await putStoredPhotos(records, true);
   });
 }
 
@@ -1663,20 +1702,7 @@ export async function flushCatalogWrites(): Promise<void> {
  */
 export async function deletePhoto(id: string): Promise<void> {
   if (!id.trim()) throw new Error("A photo id is required.");
-
-  try {
-    await flushCatalogWrites();
-    await enqueueCatalogWrite(async () => {
-      const database = await openCatalog();
-      const transaction = database.transaction(PHOTO_STORE, "readwrite");
-      const completed = transactionComplete(transaction);
-      transaction.objectStore(PHOTO_STORE).delete(id);
-      await completed;
-    });
-    revokePhotoUrls(id);
-  } catch (error) {
-    throw catalogError("Could not remove the photo from the local catalog", error);
-  }
+  await deletePhotos([id]);
 }
 
 /** Removes several catalog records in one transaction without touching source files. */
@@ -1706,37 +1732,43 @@ export async function deletePhotos(ids: readonly string[]): Promise<void> {
  */
 export async function createVirtualCopy(id: string): Promise<PhotoRecord> {
   if (!id.trim()) throw new Error("A photo id is required.");
+  const generation = catalogGeneration;
 
   try {
     await flushCatalogWrites();
-    const database = await openCatalog();
-    const transaction = database.transaction(PHOTO_STORE, "readonly");
-    const completed = transactionComplete(transaction);
-    const source = await requestResult<StoredPhoto | undefined>(
-      transaction.objectStore(PHOTO_STORE).get(id),
-    );
-    await completed;
-    if (!source) throw new Error("The source photo is no longer in the catalog.");
+    return await enqueueCatalogWrite(async () => {
+      if (generation !== catalogGeneration) {
+        throw new Error("The source photo is no longer in the catalog.");
+      }
+      const database = await openCatalog();
+      const transaction = database.transaction(PHOTO_STORE, "readonly");
+      const completed = transactionComplete(transaction);
+      const source = await requestResult<StoredPhoto | undefined>(
+        transaction.objectStore(PHOTO_STORE).get(id),
+      );
+      await completed;
+      if (!source) throw new Error("The source photo is no longer in the catalog.");
 
-    const copyId = makeId("photo");
-    const extensionIndex = source.name.lastIndexOf(".");
-    const baseName = extensionIndex > 0 ? source.name.slice(0, extensionIndex) : source.name;
-    const extension = extensionIndex > 0 ? source.name.slice(extensionIndex) : "";
-    const copy: StoredPhoto = {
-      ...source,
-      id: copyId,
-      name: `${baseName} Copy${extension}`,
-      importedAt: new Date().toISOString(),
-      lastEditedAt: new Date().toISOString(),
-      fingerprint: `${source.contentFingerprint ?? source.fingerprint}:virtual-copy:${copyId}`,
-      metadata: structuredClone(source.metadata),
-      keywords: [...source.keywords],
-      collectionIds: [...source.collectionIds],
-      edits: structuredClone(source.edits),
-      snapshots: structuredClone(source.snapshots),
-    };
-    await enqueueCatalogWrite(() => putStoredPhotos([copy]));
-    return materializePhoto(copy);
+      const copyId = makeId("photo");
+      const extensionIndex = source.name.lastIndexOf(".");
+      const baseName = extensionIndex > 0 ? source.name.slice(0, extensionIndex) : source.name;
+      const extension = extensionIndex > 0 ? source.name.slice(extensionIndex) : "";
+      const copy: StoredPhoto = {
+        ...source,
+        id: copyId,
+        name: `${baseName} Copy${extension}`,
+        importedAt: source.importedAt,
+        lastEditedAt: new Date().toISOString(),
+        fingerprint: `${source.contentFingerprint ?? source.fingerprint}:virtual-copy:${copyId}`,
+        metadata: structuredClone(source.metadata),
+        keywords: [...source.keywords],
+        collectionIds: [...source.collectionIds],
+        edits: structuredClone(source.edits),
+        snapshots: structuredClone(source.snapshots),
+      };
+      await putStoredPhotos([copy]);
+      return materializePhoto(copy);
+    });
   } catch (error) {
     if (error instanceof Error && error.message.includes("no longer")) throw error;
     throw catalogError("Could not create the virtual copy", error);
@@ -1748,9 +1780,11 @@ export async function createVirtualCopy(id: string): Promise<PhotoRecord> {
  * files. Nothing calls this automatically.
  */
 export async function clearCatalog(): Promise<void> {
+  catalogGeneration += 1;
   try {
     await flushCatalogWrites();
     await enqueueCatalogWrite(async () => {
+      await clearPreviousCatalogRecords();
       const database = await openCatalog();
       const transaction = database.transaction(
         [PHOTO_STORE, COLLECTION_STORE],
@@ -1760,7 +1794,6 @@ export async function clearCatalog(): Promise<void> {
       transaction.objectStore(PHOTO_STORE).clear();
       transaction.objectStore(COLLECTION_STORE).clear();
       await completed;
-      await clearPreviousCatalogRecords();
     });
 
     for (const id of [...activeObjectUrls.keys()]) revokePhotoUrls(id);
@@ -1825,10 +1858,14 @@ export async function getCollection(id: string): Promise<Collection | undefined>
 export async function saveCollection(
   collection: Collection,
 ): Promise<Collection> {
+  const generation = catalogGeneration;
   const normalized = validCollection(collection);
 
   try {
     await enqueueCatalogWrite(async () => {
+      if (generation !== catalogGeneration) {
+        throw new Error("Collection save stopped because the catalog was emptied.");
+      }
       const database = await openCatalog();
       const transaction = database.transaction(COLLECTION_STORE, "readwrite");
       const completed = transactionComplete(transaction);
@@ -1908,6 +1945,7 @@ function exportedPhoto(photo: StoredPhoto): ExportedPhoto {
     width: photo.width,
     height: photo.height,
     importedAt: photo.importedAt,
+    importBatch: normalizeImportBatch(photo.importBatch),
     lastEditedAt: photo.lastEditedAt,
     lastModified: photo.lastModified,
     fingerprint: photo.fingerprint,
@@ -2289,6 +2327,7 @@ function isCompatibleCatalogFormat(format: unknown): format is string {
 export async function importCatalog(
   input: string | Blob | Record<string, unknown>,
 ): Promise<CatalogImportResult> {
+  const generation = catalogGeneration;
   await flushCatalogWrites();
   const parsed = await catalogInputText(input);
   if (!isObject(parsed)) throw new Error("The catalog must contain a JSON object.");
@@ -2312,6 +2351,9 @@ export async function importCatalog(
   const parsedCollections: unknown[] = parsed.collections;
 
   return enqueueCatalogWrite(async () => {
+    if (generation !== catalogGeneration) {
+      throw new Error("Restore stopped because the catalog was emptied.");
+    }
     const existingPhotos = await getStoredPhotos();
     const byId = new Map(existingPhotos.map((photo) => [photo.id, photo]));
     const byFingerprint = new Map(
@@ -2353,6 +2395,8 @@ export async function importCatalog(
 
       updated.set(target.id, {
         ...target,
+        importBatch:
+          normalizeImportBatch(candidate.importBatch) ?? target.importBatch,
         lastEditedAt:
           stringValue(candidate.lastEditedAt) ?? target.lastEditedAt,
         metadata: importedMetadata(candidate.metadata, target.metadata),
