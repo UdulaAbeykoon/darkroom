@@ -6,6 +6,7 @@ import "./components/ExportDialog.css";
 import "./components/ImportDialog.css";
 import "./styles.css";
 import "./theme.css";
+import "./dialog-theme.css";
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
