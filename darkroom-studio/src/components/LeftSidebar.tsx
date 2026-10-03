@@ -492,7 +492,7 @@ export default function LeftSidebar({
   importActionsDisabled?: boolean;
 }) {
   return (
-    <aside className="left-sidebar">
+    <aside className={`left-sidebar ${mode === "library" ? "left-sidebar--library" : ""}`}>
       {mode === "develop" ? (
         <DevelopSidebar
           photo={photo}

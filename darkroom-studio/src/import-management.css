@@ -21,3 +21,15 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+.app-shell .left-sidebar--library {
+  overflow-y: auto;
+}
+
+.app-shell .left-sidebar--library > .sidebar-section {
+  flex-shrink: 0;
+}
+
+.app-shell .left-sidebar--library > .sidebar-section--grow {
+  min-height: auto;
+}
