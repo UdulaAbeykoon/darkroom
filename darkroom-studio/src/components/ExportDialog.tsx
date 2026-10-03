@@ -66,12 +66,20 @@ export default function ExportDialog({
     settings.format === "image/jpeg" &&
     settings.resizeMode === "original" &&
     qualityPercent === 90;
-  const instagramActive =
+  const webPresetActive =
     settings.format === "image/jpeg" &&
     settings.resizeMode === "long-edge" &&
     settings.longEdge === 2048 &&
     qualityPercent === 85;
-  const exampleName = `${settings.fileName.trim() || photo.name.replace(/\.[^.]+$/, "")}.${extension}`;
+  const emailActive =
+    settings.format === "image/jpeg" &&
+    settings.resizeMode === "long-edge" &&
+    settings.longEdge === 1024 &&
+    qualityPercent === 60;
+  const photoBaseName = photo.name.replace(/\.[^/.]+$/, "");
+  const exampleName = selectionCount > 1
+    ? `${settings.fileName || "Darkroom_export"}_001_${photoBaseName}.${extension}`
+    : `${settings.fileName || `${photoBaseName}_edit`}.${extension}`;
 
   const applyFullSizePreset = () => {
     onChange({
@@ -92,7 +100,7 @@ export default function ExportDialog({
     });
   };
 
-  const applyInstagramPreset = () => {
+  const applyWebPreset = () => {
     onChange({
       ...settings,
       format: "image/jpeg",
@@ -109,21 +117,6 @@ export default function ExportDialog({
       size="large"
       footer={
         <>
-          <div className="lrc-export-footer__preset-actions">
-            <button type="button" className="button button--quiet" disabled>
-              Add
-            </button>
-            <button type="button" className="button button--quiet" disabled>
-              Remove
-            </button>
-          </div>
-          <button
-            type="button"
-            className="button button--quiet lrc-export-footer__plugin"
-            disabled
-          >
-            Plug-in Manager…
-          </button>
           {progress ? (
             <div className="lrc-export-footer__status" role="status" aria-live="polite">
               <span className="lrc-export-footer__progress-track" aria-hidden="true">
@@ -165,111 +158,43 @@ export default function ExportDialog({
     >
       <div className="lrc-export-workspace">
         <aside className="lrc-export-presets" aria-label="Export presets">
-          <div className="lrc-export-presets__title">Preset:</div>
+          <div className="lrc-export-presets__title">Presets</div>
           <div className="lrc-export-presets__list">
-            <div className="lrc-export-presets__group">
-              <div className="lrc-export-presets__group-title">
-                <ChevronDown size={11} strokeWidth={2.3} aria-hidden="true" />
-                <span>Darkroom Presets</span>
-              </div>
-              <button
-                type="button"
-                className={`lrc-export-preset ${fullSizeActive ? "is-active" : ""}`}
-                aria-pressed={fullSizeActive}
-                onClick={applyFullSizePreset}
-              >
-                Burn Full-Sized JPEGs
-              </button>
-              <button
-                type="button"
-                className="lrc-export-preset"
-                disabled
-                title="DNG export is not available in the browser renderer"
-              >
-                Export to DNG
-              </button>
-              <button
-                type="button"
-                className="lrc-export-preset"
-                onClick={applyEmailPreset}
-              >
-                For Email (Hard Drive)
-              </button>
-              <button
-                type="button"
-                className="lrc-export-preset"
-                onClick={applyEmailPreset}
-              >
-                For Email
-              </button>
-            </div>
-
-            <div className="lrc-export-presets__group">
-              <div className="lrc-export-presets__group-title">
-                <ChevronDown size={11} strokeWidth={2.3} aria-hidden="true" />
-                <span>User Presets</span>
-              </div>
-              <button
-                type="button"
-                className={`lrc-export-preset ${instagramActive ? "is-active" : ""}`}
-                aria-pressed={instagramActive}
-                onClick={applyInstagramPreset}
-              >
-                Instagram Export
-              </button>
-            </div>
+            <button
+              type="button"
+              className={`lrc-export-preset ${fullSizeActive ? "is-active" : ""}`}
+              aria-pressed={fullSizeActive}
+              onClick={applyFullSizePreset}
+            >
+              Full-size JPEG
+            </button>
+            <button
+              type="button"
+              className={`lrc-export-preset ${emailActive ? "is-active" : ""}`}
+              aria-pressed={emailActive}
+              onClick={applyEmailPreset}
+            >
+              Email JPEG
+            </button>
+            <button
+              type="button"
+              className={`lrc-export-preset ${webPresetActive ? "is-active" : ""}`}
+              aria-pressed={webPresetActive}
+              onClick={applyWebPreset}
+            >
+              2048 px JPEG
+            </button>
           </div>
         </aside>
 
         <main className="lrc-export-settings">
           <div className="lrc-export-target">
-            <label htmlFor="lrc-export-target">Export To:</label>
-            <select
-              id="lrc-export-target"
-              disabled
-              value="hard-drive"
-              title="Files are saved through the browser download location"
-            >
-              <option value="hard-drive">Hard Drive</option>
-            </select>
+            <p className="lrc-export-note">
+              Files are saved using your browser’s download settings.
+            </p>
           </div>
 
           <div className="lrc-export-sections">
-            <ExportSection title="Export Location" defaultOpen>
-              <div className="lrc-export-form-grid">
-                <label className="lrc-export-control">
-                  <span>Export To:</span>
-                  <select disabled value="specific-folder">
-                    <option value="specific-folder">Specific folder</option>
-                  </select>
-                </label>
-                <div className="lrc-export-control">
-                  <span>Folder:</span>
-                  <span className="lrc-export-destination">
-                    <input type="text" disabled value="Downloads" readOnly />
-                    <button type="button" disabled>
-                      Choose…
-                    </button>
-                  </span>
-                </div>
-                <label className="lrc-export-check">
-                  <input type="checkbox" disabled />
-                  <span>Put in Subfolder:</span>
-                  <input type="text" disabled aria-label="Subfolder name" />
-                </label>
-                <label className="lrc-export-check">
-                  <input type="checkbox" disabled />
-                  <span>Add to This Catalog</span>
-                </label>
-                <label className="lrc-export-control">
-                  <span>Existing Files:</span>
-                  <select disabled value="ask">
-                    <option value="ask">Ask what to do</option>
-                  </select>
-                </label>
-              </div>
-            </ExportSection>
-
             <ExportSection title="File Naming" defaultOpen>
               <div className="lrc-export-form-grid">
                 <label className="lrc-export-control">
@@ -283,34 +208,7 @@ export default function ExportDialog({
                     }
                   />
                 </label>
-                <label className="lrc-export-control">
-                  <span>Extensions:</span>
-                  <select disabled value="lowercase">
-                    <option value="lowercase">Lowercase</option>
-                  </select>
-                </label>
                 <p className="lrc-export-example">Example: {exampleName}</p>
-              </div>
-            </ExportSection>
-
-            <ExportSection title="Video">
-              <div className="lrc-export-form-grid">
-                <label className="lrc-export-check">
-                  <input type="checkbox" disabled />
-                  <span>Include Video Files</span>
-                </label>
-                <label className="lrc-export-control">
-                  <span>Video Format:</span>
-                  <select disabled value="h264">
-                    <option value="h264">H.264</option>
-                  </select>
-                </label>
-                <label className="lrc-export-control">
-                  <span>Quality:</span>
-                  <select disabled value="high">
-                    <option value="high">High</option>
-                  </select>
-                </label>
               </div>
             </ExportSection>
 
@@ -355,28 +253,10 @@ export default function ExportDialog({
                     {settings.format === "image/png" ? "—" : qualityPercent}
                   </output>
                 </label>
-                <label className="lrc-export-control">
-                  <span>Color Space:</span>
-                  <select disabled value="srgb">
-                    <option value="srgb">sRGB</option>
-                  </select>
-                </label>
-                <label className="lrc-export-check">
-                  <input type="checkbox" disabled />
-                  <span>Limit File Size To:</span>
-                  <span className="lrc-export-inline-number">
-                    <input type="number" disabled value={100} readOnly />
-                    <span>K</span>
-                  </span>
-                </label>
+                <p className="lrc-export-note">
+                  Original metadata is not included in exported images.
+                </p>
               </div>
-            </ExportSection>
-
-            <ExportSection title="Content Credentials (Early Access)">
-              <label className="lrc-export-check lrc-export-check--flush">
-                <input type="checkbox" disabled />
-                <span>Attach Content Credentials</span>
-              </label>
             </ExportSection>
 
             <ExportSection title="Image Sizing" defaultOpen>
@@ -463,94 +343,24 @@ export default function ExportDialog({
                     <span>pixels</span>
                   </div>
                 ) : null}
-                <label className="lrc-export-check">
-                  <input type="checkbox" disabled />
-                  <span>Don&apos;t Enlarge</span>
-                </label>
-                <label className="lrc-export-control">
-                  <span>Resolution:</span>
-                  <span className="lrc-export-number-unit">
-                    <input type="number" disabled value={240} readOnly />
-                    <span>pixels per inch</span>
-                  </span>
-                </label>
-              </div>
-            </ExportSection>
-
-            <ExportSection title="Output Sharpening" defaultOpen>
-              <div className="lrc-export-form-grid">
-                <div className="lrc-export-resize-row">
-                  <label className="lrc-export-check lrc-export-check--flush">
-                    <input type="checkbox" disabled />
-                    <span>Sharpen For:</span>
-                  </label>
-                  <select disabled value="screen" aria-label="Sharpening output">
-                    <option value="screen">Screen</option>
-                  </select>
-                </div>
-                <label className="lrc-export-control">
-                  <span>Amount:</span>
-                  <select disabled value="standard">
-                    <option value="standard">Standard</option>
-                  </select>
-                </label>
-              </div>
-            </ExportSection>
-
-            <ExportSection title="Metadata" defaultOpen>
-              <div className="lrc-export-form-grid">
-                <label className="lrc-export-control">
-                  <span>Include:</span>
-                  <select disabled value="all">
-                    <option value="all">All Metadata</option>
-                  </select>
-                </label>
-                <label className="lrc-export-check">
-                  <input type="checkbox" disabled />
-                  <span>Remove Person Info</span>
-                </label>
-                <label className="lrc-export-check">
-                  <input type="checkbox" disabled />
-                  <span>Remove Location Info</span>
-                </label>
-                <label className="lrc-export-check">
-                  <input
-                    type="checkbox"
-                    checked={settings.includeMetadata}
-                    disabled
-                    readOnly
-                  />
-                  <span>Write Keywords as Hierarchy</span>
-                </label>
               </div>
             </ExportSection>
 
             <ExportSection title="Watermarking" defaultOpen>
               <div className="lrc-export-form-grid">
-                <div className="lrc-export-resize-row">
-                  <label className="lrc-export-check lrc-export-check--flush">
-                    <input
-                      type="checkbox"
-                      checked={settings.watermarkEnabled}
-                      onChange={(event) =>
-                        onChange({
-                          ...settings,
-                          watermarkEnabled: event.target.checked,
-                        })
-                      }
-                    />
-                    <span>Watermark:</span>
-                  </label>
-                  <select
-                    value={settings.watermarkEnabled ? "custom" : "none"}
-                    disabled={!settings.watermarkEnabled}
-                    aria-label="Watermark preset"
-                    onChange={() => undefined}
-                  >
-                    <option value="none">None</option>
-                    <option value="custom">Custom Text</option>
-                  </select>
-                </div>
+                <label className="lrc-export-check lrc-export-check--flush">
+                  <input
+                    type="checkbox"
+                    checked={settings.watermarkEnabled}
+                    onChange={(event) =>
+                      onChange({
+                        ...settings,
+                        watermarkEnabled: event.target.checked,
+                      })
+                    }
+                  />
+                  <span>Add a text watermark</span>
+                </label>
                 <label className="lrc-export-control">
                   <span>Text:</span>
                   <input
@@ -603,17 +413,6 @@ export default function ExportDialog({
                     }
                   />
                   <output>{watermarkOpacityPercent}</output>
-                </label>
-              </div>
-            </ExportSection>
-
-            <ExportSection title="Post-Processing" defaultOpen>
-              <div className="lrc-export-form-grid">
-                <label className="lrc-export-control">
-                  <span>After Export:</span>
-                  <select disabled value="nothing">
-                    <option value="nothing">Do nothing</option>
-                  </select>
                 </label>
               </div>
             </ExportSection>

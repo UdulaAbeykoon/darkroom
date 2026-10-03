@@ -234,12 +234,6 @@ export default function LibraryInspector({
       <div className="library-inspector__panels">
         <LibraryPanel title="Quick Develop" defaultOpen>
           <div className="library-quick-develop">
-            <div className="library-inspector__compact-field">
-              <span>Saved Preset</span>
-              <span className="library-inspector__select-display">
-                Default Settings
-              </span>
-            </div>
             <div className="library-inspector__section-label">Tone Control</div>
             <StepControl
               label="Exposure"
@@ -411,12 +405,6 @@ export default function LibraryInspector({
           </label>
         </LibraryPanel>
 
-        <LibraryPanel title="Comments">
-          <div className="library-comments-empty">
-            <strong>No comments</strong>
-            <span>Comments are available for synced photos.</span>
-          </div>
-        </LibraryPanel>
       </div>
     </aside>
   );

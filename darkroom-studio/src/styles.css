@@ -3438,16 +3438,6 @@ input[type="range"] {
   box-shadow: 0 0 0 1px #111;
 }
 
-@media (max-width: 1050px) {
-  .classic-module-bar.topbar {
-    grid-template-columns: 190px minmax(380px, 1fr) auto;
-  }
-
-  .classic-identity__text {
-    display: none;
-  }
-}
-
 /* On-image mask controls: quiet geometry, large invisible hit targets. */
 
 .canvas-stage.is-masking.is-brush-masking,

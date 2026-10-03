@@ -1,0 +1,920 @@
+/* Charcoal dialog surfaces and silver accents share the workspace palette. */
+.modal-backdrop {
+  background: rgb(18 18 18 / 0.7);
+  backdrop-filter: blur(5px);
+}
+
+/* Keep the three-pane importer inside the backdrop at every viewport size. */
+.modal-backdrop:has(.lrc-import-workspace) {
+  padding: 16px;
+}
+
+.modal:has(.lrc-import-workspace) {
+  width: min(1440px, 100%);
+  height: calc(100dvh - 32px);
+  max-height: calc(100dvh - 32px);
+  margin: 0;
+}
+
+.modal,
+.modal:has(.lrc-import-workspace),
+.modal:has(.lrc-export-workspace),
+.modal:has(> .modal__body > .sync-settings-dialog) {
+  border: 1px solid var(--brand-line);
+  border-radius: 12px;
+  color: var(--brand-frost);
+  background: var(--brand-panel);
+  box-shadow: 0 24px 80px rgb(0 0 0 / 0.6);
+  color-scheme: dark;
+}
+
+.modal__header,
+.modal:has(.lrc-import-workspace) .modal__header,
+.modal:has(.lrc-export-workspace) .modal__header,
+.modal:has(> .modal__body > .sync-settings-dialog) .modal__header {
+  display: flex;
+  min-height: 76px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 18px 24px;
+  border-color: var(--brand-line-soft);
+  background: var(--brand-navy);
+  box-shadow: none;
+}
+
+.modal__header h2,
+.modal:has(.lrc-import-workspace) .modal__header h2,
+.modal:has(.lrc-export-workspace) .modal__header h2,
+.modal:has(> .modal__body > .sync-settings-dialog) .modal__header h2 {
+  color: var(--brand-frost);
+  font-family: inherit;
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 1.4;
+  letter-spacing: -0.025em;
+  text-align: left;
+  text-shadow: none;
+}
+
+.modal__header p,
+.modal:has(.lrc-import-workspace) .modal__header p,
+.modal:has(.lrc-export-workspace) .modal__header p {
+  display: block;
+  max-width: 65ch;
+  margin-top: 4px;
+  color: var(--brand-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.modal__header .icon-button,
+.modal:has(.lrc-export-workspace) .modal__header .icon-button,
+.modal:has(> .modal__body > .sync-settings-dialog) .modal__header .icon-button {
+  position: static;
+  display: grid;
+  width: 32px;
+  height: 32px;
+  min-width: 32px;
+  min-height: 32px;
+  flex: 0 0 auto;
+  place-items: center;
+  margin: 0;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: var(--brand-muted);
+  background: transparent;
+  box-shadow: none;
+}
+
+.modal__header .icon-button:hover,
+.modal:has(.lrc-export-workspace) .modal__header .icon-button:hover {
+  border-color: var(--brand-line);
+  color: var(--brand-frost);
+  background: var(--brand-raised);
+}
+
+.modal:has(.lrc-export-workspace) .modal__header .icon-button svg {
+  width: 16px;
+  height: 16px;
+  color: currentColor;
+  opacity: 1;
+}
+
+.modal__body,
+.modal:has(> .modal__body > .sync-settings-dialog) .modal__body {
+  background: var(--brand-panel);
+}
+
+.modal__footer,
+.modal:has(.lrc-import-workspace) .modal__footer,
+.modal:has(.lrc-export-workspace) .modal__footer,
+.modal:has(> .modal__body > .sync-settings-dialog) .modal__footer {
+  min-height: 70px;
+  gap: 8px;
+  padding: 16px 24px;
+  border-color: var(--brand-line-soft);
+  background: var(--brand-navy);
+  box-shadow: none;
+}
+
+.modal .button,
+.modal:has(.lrc-export-workspace) .modal__footer .button,
+.sync-settings-dialog__button {
+  min-height: 34px;
+  padding: 7px 13px;
+  border: 1px solid var(--brand-line);
+  border-radius: 6px;
+  color: var(--brand-frost);
+  background: var(--brand-raised);
+  box-shadow: none;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.4;
+  text-shadow: none;
+}
+
+.modal .button:hover:not(:disabled),
+.modal:has(.lrc-export-workspace) .modal__footer .button:hover:not(:disabled),
+.sync-settings-dialog__button:hover:not(:disabled) {
+  border-color: var(--brand-accent);
+  color: var(--brand-frost);
+  background: var(--brand-raised);
+}
+
+.modal .button--primary,
+.modal:has(.lrc-export-workspace) .modal__footer .lrc-export-footer__export,
+.sync-settings-dialog__button--primary {
+  border-color: var(--brand-accent);
+  color: var(--brand-ink);
+  background: var(--brand-accent);
+  box-shadow: none;
+}
+
+.modal .button--primary:hover:not(:disabled),
+.modal:has(.lrc-export-workspace) .modal__footer .lrc-export-footer__export:hover:not(:disabled),
+.sync-settings-dialog__button--primary:hover:not(:disabled) {
+  border-color: var(--brand-accent-hover);
+  color: var(--brand-ink);
+  background: var(--brand-accent-hover);
+}
+
+.modal .button:disabled,
+.modal:has(.lrc-export-workspace) .modal__footer .button:disabled,
+.sync-settings-dialog__button:disabled {
+  border-color: var(--brand-line-soft);
+  color: var(--brand-faint);
+  background: var(--brand-raised);
+  opacity: 0.55;
+}
+
+.modal :is(button, input, select, summary):focus-visible {
+  outline: 2px solid var(--brand-accent-hover);
+  outline-offset: 3px;
+}
+
+/* Import: a generous contact sheet between compact source and settings rails. */
+.lrc-import-workspace {
+  --lrc-blue: var(--brand-accent);
+  --lrc-blue-bright: var(--brand-accent-hover);
+  --lrc-ink: var(--canvas);
+  --lrc-panel: var(--brand-panel);
+  --lrc-panel-raised: var(--brand-raised);
+  --lrc-line: var(--brand-line-soft);
+  --lrc-line-soft: var(--brand-line-soft);
+  --lrc-text: var(--brand-frost);
+  --lrc-muted: var(--brand-muted);
+  --lrc-faint: var(--brand-faint);
+  grid-template-columns: 196px minmax(0, 1fr) 272px;
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.lrc-import-source,
+.lrc-import-settings,
+.lrc-import-panel,
+.lrc-import-main,
+.lrc-import-panel__body,
+.lrc-import-methods,
+.lrc-import-reviewbar,
+.lrc-import-source__summary {
+  border-color: var(--brand-line-soft);
+  background: var(--brand-panel);
+}
+
+.lrc-import-main {
+  grid-template-rows: auto 44px minmax(0, 1fr);
+}
+
+.lrc-import-rail__title,
+.lrc-import-panel > summary {
+  min-height: 42px;
+  padding-inline: 14px;
+  border-color: var(--brand-line-soft);
+  color: var(--brand-frost);
+  background: var(--brand-panel);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.lrc-import-panel > summary:hover {
+  background: var(--brand-raised);
+}
+
+.lrc-import-panel__body {
+  gap: 15px;
+  padding: 16px;
+}
+
+.lrc-import-source__device,
+.lrc-import-source__summary {
+  padding: 16px 14px;
+}
+
+.lrc-import-source__tree button {
+  min-height: 34px;
+  border-radius: 6px;
+}
+
+.lrc-import-source__tree button.is-active,
+.lrc-import-reviewbar button.is-active,
+.lrc-import-method.is-active {
+  border-color: var(--brand-accent);
+  color: var(--brand-frost);
+  background: var(--brand-raised);
+  box-shadow: none;
+}
+
+.lrc-import-source__tree button,
+.lrc-import-reviewbar button,
+.lrc-import-method,
+.lrc-import-check-row {
+  color: var(--brand-muted);
+}
+
+.lrc-import-source__tree button:hover,
+.lrc-import-reviewbar button:hover,
+.lrc-import-method:not(:disabled):hover {
+  color: var(--brand-frost);
+  background: var(--brand-raised);
+}
+
+.lrc-import-source__device strong,
+.lrc-import-source__summary strong,
+.lrc-import-destination strong,
+.lrc-import-field > span,
+.lrc-import-check-row strong,
+.lrc-import-footer__local strong,
+.lrc-import-footer__selection strong {
+  color: var(--brand-frost);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.lrc-import-source__device small,
+.lrc-import-source__summary small,
+.lrc-import-source__tree button small,
+.lrc-import-source__note,
+.lrc-import-destination small,
+.lrc-import-field > small,
+.lrc-import-check-row small,
+.lrc-import-panel__notice,
+.lrc-import-footer__local small,
+.lrc-import-footer__selection span {
+  color: var(--brand-faint);
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.lrc-import-methods {
+  min-height: 104px;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 8px;
+  padding: 14px;
+}
+
+.lrc-import-methods__prompt,
+.lrc-import-methods > p {
+  display: none;
+}
+
+.lrc-import-methods__choices {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.lrc-import-method {
+  min-height: 64px;
+  padding: 9px;
+  border-color: var(--brand-line-soft);
+  border-radius: 6px;
+}
+
+.lrc-import-method strong {
+  font-size: 11px;
+}
+
+.lrc-import-method small {
+  color: var(--brand-faint);
+  font-size: 9px;
+}
+
+.lrc-import-method__icon,
+.lrc-import-method.is-active .lrc-import-method__icon {
+  border-radius: 4px;
+  color: inherit;
+  background: transparent;
+}
+
+.lrc-import-reviewbar button {
+  min-height: 30px;
+  border-radius: 6px;
+  font-size: 11px;
+}
+
+.lrc-import-reviewbar button span,
+.lrc-import-reviewbar__checks button {
+  color: var(--brand-muted);
+}
+
+.lrc-import-contact-sheet {
+  gap: 12px;
+  padding: 18px;
+  background: var(--canvas);
+}
+
+.lrc-import-thumbnail {
+  padding: 6px;
+  border-color: var(--brand-line-soft);
+  border-radius: 6px;
+  background: var(--brand-panel);
+  box-shadow: none;
+}
+
+.lrc-import-thumbnail:hover {
+  border-color: var(--brand-accent);
+  background: var(--brand-raised);
+}
+
+.lrc-import-thumbnail.is-checked {
+  border-color: var(--brand-frost);
+  background: var(--brand-raised);
+  box-shadow: none;
+}
+
+.lrc-import-thumbnail__image {
+  border-radius: 3px;
+  background: var(--canvas);
+}
+
+.lrc-import-thumbnail__caption strong {
+  color: var(--brand-frost);
+  font-size: 11px;
+}
+
+.lrc-import-thumbnail__caption small,
+.lrc-import-thumbnail__format {
+  color: var(--brand-muted);
+  font-size: 9px;
+}
+
+.lrc-import-thumbnail__status {
+  font-size: 9px;
+}
+
+.lrc-import-thumbnail__check > span {
+  border-color: var(--brand-faint);
+  border-radius: 4px;
+  color: var(--brand-ink);
+  background: rgb(32 32 32 / 0.88);
+}
+
+.lrc-import-thumbnail.is-checked .lrc-import-thumbnail__check > span {
+  border-color: var(--brand-accent);
+  background: var(--brand-accent);
+}
+
+.lrc-import-thumbnail__check input:focus-visible + span {
+  outline-color: var(--brand-accent-hover);
+}
+
+.lrc-import-field select,
+.lrc-import-field input[type="text"] {
+  height: 34px;
+  padding-inline: 9px;
+  border-color: var(--brand-line);
+  border-radius: 6px;
+  color: var(--brand-frost);
+  background: var(--brand-control);
+}
+
+.lrc-import-panel__notice {
+  padding: 10px;
+  border-color: var(--brand-line);
+  border-radius: 0 4px 4px 0;
+  background: var(--brand-raised);
+}
+
+.lrc-import-destination {
+  padding: 10px;
+  border-color: var(--brand-line-soft);
+  border-radius: 6px;
+  background: var(--brand-raised);
+}
+
+.lrc-import-footer__local,
+.lrc-import-contact-sheet__empty {
+  color: var(--brand-muted);
+}
+
+.lrc-import-contact-sheet__empty strong {
+  color: var(--brand-frost);
+  font-size: 13px;
+}
+
+.lrc-import-contact-sheet__empty span {
+  font-size: 11px;
+}
+
+/* Export: familiar form hierarchy without native-window decoration. */
+.modal:has(.lrc-export-workspace) {
+  width: min(880px, calc(100vw - 48px));
+}
+
+.lrc-export-workspace {
+  --lrc-export-text: var(--brand-frost);
+  --lrc-export-muted: var(--brand-muted);
+  --lrc-export-line: var(--brand-line-soft);
+  --lrc-export-blue: var(--brand-accent);
+  grid-template-columns: 204px minmax(0, 1fr);
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.lrc-export-presets,
+.lrc-export-settings,
+.lrc-export-target,
+.lrc-export-sections {
+  border-color: var(--brand-line-soft);
+  color: var(--brand-muted);
+  background: var(--brand-panel);
+}
+
+.lrc-export-presets {
+  padding: 18px 12px;
+}
+
+.lrc-export-presets__title {
+  padding: 0 9px 14px;
+  color: var(--brand-frost);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.lrc-export-presets__list {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.lrc-export-presets__group-title {
+  min-height: 32px;
+  padding-inline: 5px;
+  color: var(--brand-faint);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.lrc-export-preset {
+  min-height: 34px;
+  padding: 7px 9px 7px 22px;
+  border-radius: 6px;
+  color: var(--brand-muted);
+  cursor: pointer;
+}
+
+.lrc-export-preset.is-active {
+  color: var(--brand-frost);
+  background: var(--brand-raised);
+}
+
+.lrc-export-preset:hover:not(:disabled):not(.is-active) {
+  color: var(--brand-frost);
+  background: var(--brand-raised);
+}
+
+.lrc-export-target {
+  min-height: 65px;
+  justify-content: flex-start;
+  gap: 12px;
+  padding: 14px 18px;
+}
+
+.lrc-export-target label {
+  color: var(--brand-frost);
+}
+
+.lrc-export-sections {
+  padding: 16px 18px;
+}
+
+.lrc-export-sections,
+.lrc-export-presets__list {
+  scrollbar-color: var(--brand-line) var(--brand-panel);
+}
+
+.lrc-export-sections::-webkit-scrollbar-track,
+.lrc-export-presets__list::-webkit-scrollbar-track {
+  background: var(--brand-panel);
+}
+
+.lrc-export-sections::-webkit-scrollbar-thumb,
+.lrc-export-presets__list::-webkit-scrollbar-thumb {
+  border-color: var(--brand-ink);
+  background: var(--brand-line);
+}
+
+.lrc-export-section {
+  margin-bottom: 10px;
+}
+
+.lrc-export-section > summary {
+  min-height: 42px;
+  gap: 7px;
+  padding: 10px 12px;
+  border-color: var(--brand-line-soft);
+  border-radius: 6px;
+  color: var(--brand-frost);
+  background: var(--brand-raised);
+  box-shadow: none;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.lrc-export-section > summary:hover {
+  background: var(--brand-raised);
+}
+
+.lrc-export-section[open] > summary {
+  border-radius: 6px 6px 0 0;
+}
+
+.lrc-export-section__body {
+  padding: 18px 16px;
+  border-color: var(--brand-line-soft);
+  border-radius: 0 0 6px 6px;
+  color: var(--brand-muted);
+  background: var(--brand-panel);
+  box-shadow: none;
+}
+
+.lrc-export-form-grid {
+  gap: 12px;
+}
+
+.lrc-export-control,
+.lrc-export-check {
+  color: var(--brand-muted);
+}
+
+.lrc-export-control input[type="text"],
+.lrc-export-control input[type="number"],
+.lrc-export-control select,
+.lrc-export-target select,
+.lrc-export-destination input,
+.lrc-export-destination button,
+.lrc-export-resize-row select,
+.lrc-export-dimension-row input,
+.lrc-export-inline-number input,
+.lrc-export-number-unit input,
+.lrc-export-check > input[type="text"],
+.lrc-export-control--range output {
+  height: 34px;
+  padding: 6px 9px;
+  border-color: var(--brand-line);
+  border-radius: 6px;
+  color: var(--brand-frost);
+  background: var(--brand-control);
+  box-shadow: none;
+}
+
+.lrc-export-control input:not(:disabled):focus,
+.lrc-export-control select:not(:disabled):focus,
+.lrc-export-resize-row select:not(:disabled):focus {
+  border-color: var(--brand-faint);
+  box-shadow: none;
+}
+
+.lrc-export-control--range.is-disabled output {
+  color: var(--brand-faint);
+  background: var(--brand-raised);
+}
+
+.lrc-export-control--range output {
+  font-size: 11px;
+}
+
+.lrc-export-number-unit > span,
+.lrc-export-inline-number > span,
+.lrc-export-example,
+.lrc-export-dimension-row > span,
+.lrc-export-footer__status {
+  color: var(--brand-faint);
+  font-size: 11px;
+}
+
+.lrc-export-footer__progress-track {
+  border-color: var(--brand-line);
+  background: var(--brand-raised);
+}
+
+.lrc-export-footer__progress-track > span {
+  background: var(--brand-accent);
+}
+
+/* Sync settings share the same controls, with a clear selection hierarchy. */
+.sync-settings-dialog {
+  color: var(--brand-frost);
+  font-family: inherit;
+  font-size: 12px;
+}
+
+.sync-settings-dialog__instruction {
+  padding: 20px 24px;
+  color: var(--brand-muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.sync-settings-dialog__checklist {
+  margin: 0 24px 24px;
+  padding: 14px 16px;
+  border-color: var(--brand-line-soft);
+  border-radius: 8px;
+  background: var(--brand-panel);
+  box-shadow: none;
+}
+
+.sync-settings-dialog__legend {
+  color: var(--brand-muted);
+  font-size: 11px;
+}
+
+.sync-settings-dialog__option {
+  min-height: 32px;
+  color: var(--brand-frost);
+}
+
+.sync-settings-dialog__option--child {
+  min-height: 28px;
+  color: var(--brand-muted);
+  font-size: 11px;
+}
+
+.sync-settings-dialog__children::before {
+  background: var(--brand-line-soft);
+}
+
+.sync-settings-dialog__checkbox {
+  border-color: var(--brand-accent);
+  border-radius: 3px;
+  background: var(--brand-control);
+  box-shadow: none;
+}
+
+.sync-settings-dialog__option > input:checked + .sync-settings-dialog__checkbox,
+.sync-settings-dialog__option > input:indeterminate + .sync-settings-dialog__checkbox {
+  border-color: var(--brand-accent);
+  background: var(--brand-accent);
+  box-shadow: none;
+}
+
+.sync-settings-dialog__option > input:checked + .sync-settings-dialog__checkbox::after {
+  border-color: var(--brand-ink);
+}
+
+.sync-settings-dialog__option > input:indeterminate + .sync-settings-dialog__checkbox::after {
+  background: var(--brand-ink);
+}
+
+.sync-settings-dialog__option:hover {
+  color: var(--brand-frost);
+}
+
+.sync-settings-dialog__option:hover .sync-settings-dialog__checkbox {
+  box-shadow: 0 0 0 1px var(--brand-faint);
+}
+
+.sync-settings-dialog__option > input:focus-visible + .sync-settings-dialog__checkbox {
+  outline-color: var(--brand-accent-hover);
+}
+
+.sync-settings-dialog__button:active:not(:disabled) {
+  box-shadow: none;
+}
+
+/* The shortcut guide is a readable reference, including on narrow displays. */
+.shortcut-toggle {
+  gap: 12px;
+  margin-bottom: 24px;
+  padding: 16px;
+  border-color: var(--brand-line-soft);
+  border-radius: 8px;
+  background: var(--brand-raised);
+}
+
+.shortcut-toggle strong {
+  color: var(--brand-frost);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.shortcut-toggle small {
+  max-width: 70ch;
+  color: var(--brand-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.shortcut-groups {
+  gap: 28px;
+}
+
+.shortcut-groups h3 {
+  margin-bottom: 12px;
+  color: var(--brand-frost);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.shortcut-groups dl,
+.shortcut-groups dl > div {
+  border-color: var(--brand-line-soft);
+}
+
+.shortcut-groups dl > div {
+  min-height: 42px;
+}
+
+.shortcut-groups kbd {
+  min-height: 24px;
+  border-color: var(--brand-line);
+  border-radius: 5px;
+  color: var(--brand-frost);
+  background: var(--brand-raised);
+  box-shadow: none;
+  font-size: 11px;
+}
+
+.shortcut-groups dd {
+  color: var(--brand-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+@media (max-width: 1080px) {
+  .lrc-import-workspace {
+    grid-template-columns: 152px minmax(0, 1fr) 238px;
+  }
+
+  .lrc-import-method {
+    grid-template-columns: minmax(0, 1fr);
+    justify-items: center;
+    gap: 4px;
+    text-align: center;
+  }
+
+  .lrc-import-method small {
+    display: none;
+  }
+
+  .lrc-import-reviewbar {
+    overflow-x: auto;
+  }
+
+  .lrc-import-reviewbar__filters,
+  .lrc-import-reviewbar__checks {
+    flex: 0 0 auto;
+  }
+}
+
+@media (max-width: 760px) {
+  .modal:has(.lrc-export-workspace) {
+    width: calc(100vw - 20px);
+  }
+
+  .lrc-export-workspace {
+    grid-template-columns: 160px minmax(0, 1fr);
+  }
+
+  .lrc-export-sections {
+    padding: 12px;
+  }
+
+  .lrc-export-section__body {
+    padding: 14px 10px;
+  }
+}
+
+@media (max-width: 720px) {
+  .lrc-import-workspace {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .lrc-import-methods__choices {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .lrc-import-main {
+    min-height: 420px;
+  }
+
+  .modal__header,
+  .modal:has(.lrc-import-workspace) .modal__header,
+  .modal:has(.lrc-export-workspace) .modal__header,
+  .modal:has(> .modal__body > .sync-settings-dialog) .modal__header {
+    min-height: 68px;
+    padding: 16px;
+  }
+
+  .modal__footer,
+  .modal:has(.lrc-import-workspace) .modal__footer,
+  .modal:has(.lrc-export-workspace) .modal__footer,
+  .modal:has(> .modal__body > .sync-settings-dialog) .modal__footer {
+    min-height: 66px;
+    padding: 14px 16px;
+  }
+}
+
+@media (max-width: 610px) {
+  .modal:has(.lrc-export-workspace) {
+    width: calc(100vw - 20px);
+    height: calc(100dvh - 20px);
+    max-height: calc(100dvh - 20px);
+  }
+
+  .lrc-export-workspace {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: 154px minmax(0, 1fr);
+  }
+
+  .lrc-export-presets {
+    padding: 10px 12px;
+  }
+
+  .lrc-export-presets__title {
+    padding-bottom: 6px;
+  }
+
+  .lrc-export-target {
+    min-height: 56px;
+    padding: 10px 14px;
+  }
+
+  .sync-settings-dialog__instruction {
+    padding: 16px;
+  }
+
+  .sync-settings-dialog__checklist {
+    margin: 0 16px 16px;
+  }
+}
+
+@media (max-width: 460px) {
+  .lrc-export-control,
+  .lrc-export-resize-row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 6px;
+  }
+
+  .lrc-export-control > span:first-child {
+    text-align: left;
+  }
+
+  .lrc-export-control--range {
+    grid-template-columns: minmax(0, 1fr) 44px;
+  }
+
+  .lrc-export-control--range > span:first-child {
+    grid-column: 1 / -1;
+  }
+
+  .lrc-export-check,
+  .lrc-export-example,
+  .lrc-export-dimension-row {
+    padding-left: 0;
+  }
+
+  .lrc-export-resize-row .lrc-export-check {
+    justify-content: start;
+  }
+}
