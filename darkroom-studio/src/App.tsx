@@ -44,6 +44,7 @@ import Filmstrip from "./components/Filmstrip";
 import FilmstripContextMenu, {
   type FilmstripMenuItem,
 } from "./components/FilmstripContextMenu";
+import { formatImportGroupDate } from "./components/ImportHistory";
 import LeftSidebar from "./components/LeftSidebar";
 import LibraryInspector from "./components/LibraryInspector";
 import LibraryWorkspace from "./components/LibraryWorkspace";
@@ -83,6 +84,9 @@ import {
   savePhotos,
 } from "./lib/catalog";
 import type { ImportProgress } from "./lib/catalog";
+import { deleteDevelopedPreviews } from "./lib/developedPreview";
+import { getImportGroups, getPhotoImportGroupId } from "./lib/importHistory";
+import "./import-management.css";
 import { ImageEngine } from "./lib/imageEngine";
 import { solveGuidedUpright } from "./lib/guidedUpright";
 import { applyPresetAtAmount } from "./lib/presetMath";
@@ -336,6 +340,14 @@ export default function App() {
     name: string;
   } | null>(null);
   const [catalogBusy, setCatalogBusy] = useState(false);
+  const catalogOperationRef = useRef(false);
+  const [deletingPhotos, setDeletingPhotos] = useState(false);
+  const [pendingDeletion, setPendingDeletion] = useState<{
+    ids: string[];
+    importId?: string;
+    label?: string;
+  } | null>(null);
+  const catalogActionsDisabled = loading || importing || exporting || catalogBusy || deletingPhotos;
   const [persistentStorage, setPersistentStorage] = useState<boolean | null>(
     null,
   );
@@ -574,13 +586,13 @@ export default function App() {
     }));
   }, [activePhoto?.id]);
 
+  const importGroups = useMemo(() => getImportGroups(photos), [photos]);
   const deferredSearch = useDeferredValue(search);
   const filteredPhotoIds = useMemo(() => {
     let result = [...photosRef.current];
-    if (source === "recent") {
-      result = result.filter(
-        (photo) => Date.now() - Date.parse(photo.importedAt) < 86_400_000,
-      );
+    if (source.startsWith("import:")) {
+      const importId = source.slice("import:".length);
+      result = result.filter((photo) => getPhotoImportGroupId(photo) === importId);
     } else if (source === "picks") {
       result = result.filter((photo) => photo.flag === "pick");
     } else if (source === "five-stars") {
@@ -632,6 +644,19 @@ export default function App() {
   );
   const filteredPhotosRef = useRef<PhotoRecord[]>(filteredPhotos);
   filteredPhotosRef.current = filteredPhotos;
+
+  useEffect(() => {
+    const visible = new Set(filteredPhotoIds);
+    setActiveId((current) => current && visible.has(current) ? current : filteredPhotoIds[0] ?? null);
+    setSelectedIds((current) => {
+      const next = new Set([...current].filter((id) => visible.has(id)));
+      return next.size === current.size ? current : next;
+    });
+  }, [filteredPhotoIds]);
+
+  const selectAllVisible = useCallback(() => {
+    setSelectedIds(new Set(filteredPhotosRef.current.map((photo) => photo.id)));
+  }, []);
 
   const updatePhoto = useCallback(
     (
@@ -786,18 +811,28 @@ export default function App() {
     setHistoryVersion((version) => version + 1);
   }, [activeId, commitEdit, updatePhoto]);
 
+  const queueImportFiles = useCallback((files: File[]) => {
+    if (catalogOperationRef.current || document.querySelector('[role="dialog"]')) return;
+    setPendingImportFiles(files);
+  }, []);
+
   const handleImport = useCallback(
     async (
       files: File[],
       options: ImportOptions = normalizeImportOptions(),
     ) => {
-      if (!files.length || importing) return;
+      if (!files.length || catalogOperationRef.current) return;
+      catalogOperationRef.current = true;
       setImporting(true);
       setImportFailures([]);
       try {
         const result = await importFiles(files, options, setImportProgress);
         if (result.photos.length) {
           setPhotosSafe((current) => [...result.photos, ...current]);
+          setSource(`import:${getPhotoImportGroupId(result.photos[0])}`);
+          setSearch("");
+          setMinimumRating(0);
+          setMode("library");
           setActiveId(result.photos[0].id);
           setSelectedIds(new Set(result.photos.map((photo) => photo.id)));
           lastSelectedRef.current = result.photos[0].id;
@@ -816,6 +851,7 @@ export default function App() {
       } catch (error) {
         notify(error instanceof Error ? error.message : "Import failed.", "error");
       } finally {
+        catalogOperationRef.current = false;
         setImporting(false);
         setImportProgress(null);
         setPendingImportFiles([]);
@@ -826,6 +862,7 @@ export default function App() {
   );
 
   const handleFolderImport = useCallback(async () => {
+    if (catalogOperationRef.current || document.querySelector('[role="dialog"]')) return;
     const picker = (
       window as Window & {
         showDirectoryPicker?: () => Promise<unknown>;
@@ -839,12 +876,12 @@ export default function App() {
     try {
       const handle = await picker();
       const files = await collectDirectoryFiles(handle);
-      setPendingImportFiles(files);
+      queueImportFiles(files);
     } catch (error) {
       if (error instanceof DOMException && error.name === "AbortError") return;
       notify(error instanceof Error ? error.message : "Could not open that folder.", "error");
     }
-  }, [notify]);
+  }, [notify, queueImportFiles]);
 
   const selectPhoto = useCallback(
     (id: string, additive: boolean, range: boolean) => {
@@ -1268,6 +1305,9 @@ export default function App() {
 
   const createContextVirtualCopy = useCallback(
     async (photoId: string) => {
+      if (catalogOperationRef.current) return;
+      catalogOperationRef.current = true;
+      setCatalogBusy(true);
       try {
         const copy = await createVirtualCopy(photoId);
         setPhotosSafe((current) => [copy, ...current]);
@@ -1280,6 +1320,9 @@ export default function App() {
           error instanceof Error ? error.message : "Could not create the virtual copy.",
           "error",
         );
+      } finally {
+        catalogOperationRef.current = false;
+        setCatalogBusy(false);
       }
     },
     [notify, setPhotosSafe],
@@ -1376,42 +1419,77 @@ export default function App() {
     [notify],
   );
 
-  const removeContextPhotos = useCallback(
-    async (ids: readonly string[]) => {
-      const count = ids.length;
-      if (!count) return;
-      const confirmed = window.confirm(
-        `Remove ${count === 1 ? "this photo" : `these ${count} photos`} from the Darkroom catalog? The original files will not be deleted.`,
-      );
-      if (!confirmed) return;
-      try {
-        await deletePhotos(ids);
-        const removed = new Set(ids);
-        const remaining = photosRef.current.filter((photo) => !removed.has(photo.id));
-        setPhotosSafe(remaining);
-        const nextActive = removed.has(activeId ?? "")
-          ? remaining[0]?.id ?? null
-          : activeId;
-        setActiveId(nextActive);
-        setSelectedIds(nextActive ? new Set([nextActive]) : new Set());
-        if (referencePhotoId && removed.has(referencePhotoId)) {
-          setReferencePhotoId(null);
-        }
-        notify(
-          `Removed ${count} ${count === 1 ? "photo" : "photos"} from the catalog.`,
-          "success",
-        );
-      } catch (error) {
-        notify(
-          error instanceof Error ? error.message : "Could not remove the photos.",
-          "error",
-        );
+  const removeContextPhotos = useCallback((ids: readonly string[]) => {
+    if (catalogOperationRef.current) return;
+    const existingIds = [...new Set(ids)].filter((id) => photoByIdRef.current.has(id));
+    if (!existingIds.length) return;
+    commitEdit();
+    setFilmstripMenu(null);
+    setPendingDeletion({ ids: existingIds });
+  }, [commitEdit]);
+
+  const removeImport = useCallback((importId: string) => {
+    if (catalogOperationRef.current) return;
+    const group = getImportGroups(photosRef.current).find((item) => item.id === importId);
+    if (!group) return;
+    commitEdit();
+    setFilmstripMenu(null);
+    setPendingDeletion({
+      ids: group.photoIds,
+      importId,
+      label: [group.label, formatImportGroupDate(group)].filter(Boolean).join(" · "),
+    });
+  }, [commitEdit]);
+
+  const confirmPhotoDeletion = useCallback(async () => {
+    if (!pendingDeletion || catalogOperationRef.current) return;
+    catalogOperationRef.current = true;
+    setDeletingPhotos(true);
+    const ids = pendingDeletion.ids.filter((id) => photoByIdRef.current.has(id));
+    try {
+      await deletePhotos(ids);
+      const removed = new Set(ids);
+      const remaining = photosRef.current.filter((photo) => !removed.has(photo.id));
+      // Update the lookup before unmounting editors, whose cleanup can commit edits.
+      setPhotosSafe(remaining);
+      deleteDevelopedPreviews(ids);
+      ids.forEach((id) => historiesRef.current.delete(id));
+      if (transactionRef.current && removed.has(transactionRef.current)) transactionRef.current = null;
+      if (lastSelectedRef.current && removed.has(lastSelectedRef.current)) lastSelectedRef.current = null;
+      setActiveId((current) => current && !removed.has(current) ? current : null);
+      setSelectedIds((current) => new Set([...current].filter((id) => !removed.has(id))));
+      setReferencePhotoId((current) => current && removed.has(current) ? null : current);
+      if (presetBaseRef.current && removed.has(presetBaseRef.current.photoId)) {
+        presetBaseRef.current = null;
+        setActivePresetId(null);
+        setPreviewPreset(null);
       }
-    },
-    [activeId, notify, referencePhotoId, setPhotosSafe],
-  );
+      setHistoryVersion((version) => version + 1);
+      setShowExport(false);
+      setHistogram(null);
+      if (histogramTimerRef.current) clearTimeout(histogramTimerRef.current);
+      histogramTimerRef.current = null;
+      pendingHistogramRef.current = null;
+      if (!remaining.length || (source.startsWith("import:") &&
+        !remaining.some((photo) => `import:${getPhotoImportGroupId(photo)}` === source))) {
+        setSource("all");
+        setSearch("");
+        setMinimumRating(0);
+        setMode("library");
+      }
+      setPendingDeletion(null);
+      notify(`Deleted ${ids.length} ${ids.length === 1 ? "photo" : "photos"} and their cached previews from this device.`, "success");
+    } catch (error) {
+      notify(error instanceof Error ? error.message : "Could not delete the photos. Please try again.", "error");
+    } finally {
+      catalogOperationRef.current = false;
+      setDeletingPhotos(false);
+    }
+  }, [notify, pendingDeletion, setPhotosSafe, source]);
 
   const downloadCatalogBackup = useCallback(async () => {
+    if (catalogOperationRef.current) return;
+    catalogOperationRef.current = true;
     setCatalogBusy(true);
     try {
       const contents = await exportCatalog();
@@ -1432,12 +1510,15 @@ export default function App() {
         "error",
       );
     } finally {
+      catalogOperationRef.current = false;
       setCatalogBusy(false);
     }
   }, [notify]);
 
   const restoreCatalogBackup = useCallback(
     async (file: File) => {
+      if (catalogOperationRef.current) return;
+      catalogOperationRef.current = true;
       setCatalogBusy(true);
       try {
         const result = await importCatalog(file);
@@ -1473,6 +1554,7 @@ export default function App() {
           "error",
         );
       } finally {
+        catalogOperationRef.current = false;
         setCatalogBusy(false);
         if (catalogInputRef.current) catalogInputRef.current.value = "";
       }
@@ -2021,7 +2103,8 @@ export default function App() {
   );
 
   const handleExport = useCallback(async () => {
-    if (!exportTargets.length) return;
+    if (!exportTargets.length || catalogOperationRef.current) return;
+    catalogOperationRef.current = true;
     exportCanceledRef.current = false;
     setExporting(true);
     setExportProgress({
@@ -2029,10 +2112,11 @@ export default function App() {
       total: exportTargets.length,
       name: exportTargets[0].name,
     });
-    const controller = new ImageEngine(document.createElement("canvas"));
+    let controller: ImageEngine | null = null;
     let exported = 0;
     const failures: string[] = [];
     try {
+      controller = new ImageEngine(document.createElement("canvas"));
       const extension =
         exportSettings.format === "image/png"
           ? "png"
@@ -2096,7 +2180,8 @@ export default function App() {
     } catch (error) {
       notify(error instanceof Error ? error.message : "Export failed.", "error");
     } finally {
-      controller.destroy();
+      controller?.destroy();
+      catalogOperationRef.current = false;
       setExporting(false);
       setExportProgress(null);
     }
@@ -2162,6 +2247,19 @@ export default function App() {
         if (event.shiftKey) redo();
         else undo();
         return;
+      }
+      if (mode === "library" && !target?.isContentEditable &&
+        !target?.closest('input, textarea, select, [role="menu"]')) {
+        if (meta && event.key.toLowerCase() === "a") {
+          event.preventDefault();
+          selectAllVisible();
+          return;
+        }
+        if ((event.key === "Delete" || event.key === "Backspace") && !meta && !event.altKey) {
+          event.preventDefault();
+          removeContextPhotos([...selectedIds]);
+          return;
+        }
       }
       if (isTyping(event.target)) return;
       if (meta && event.shiftKey && event.key.toLowerCase() === "i") {
@@ -2264,6 +2362,9 @@ export default function App() {
   }, [
     activePhoto,
     activeHealSpotId,
+    selectAllVisible,
+    removeContextPhotos,
+    selectedIds,
     cycleCropOverlay,
     createMask,
     mode,
@@ -2286,8 +2387,11 @@ export default function App() {
   const sourceLabel =
     source === "all"
       ? "All Photographs"
-      : source === "recent"
-        ? "Previous Import"
+      : source.startsWith("import:")
+        ? (() => {
+          const group = importGroups.find((item) => `import:${item.id}` === source);
+          return group ? [group.label, formatImportGroupDate(group)].filter(Boolean).join(" · ") : "Import";
+        })()
         : source === "picks"
           ? "Picks"
           : source === "five-stars"
@@ -2557,6 +2661,7 @@ export default function App() {
           label: contextTargetIds.length > 1 ? "Remove Photos…" : "Remove Photo…",
           icon: Trash2,
           tone: "danger",
+          disabled: catalogActionsDisabled,
           onSelect: () => void removeContextPhotos(contextTargetIds),
         },
         {
@@ -2579,11 +2684,11 @@ export default function App() {
       className={`app-shell ${panelsVisible ? "" : "panels-hidden"}`}
       onDragOver={(event) => {
         event.preventDefault();
-        event.dataTransfer.dropEffect = "copy";
+        event.dataTransfer.dropEffect = catalogActionsDisabled || pendingDeletion ? "none" : "copy";
       }}
       onDrop={(event) => {
         event.preventDefault();
-        setPendingImportFiles(Array.from(event.dataTransfer.files));
+        queueImportFiles(Array.from(event.dataTransfer.files));
       }}
     >
       <input
@@ -2593,7 +2698,7 @@ export default function App() {
         multiple
         accept={`image/jpeg,image/png,image/webp,image/gif,image/bmp,image/tiff,image/heic,image/heif,.jpg,.jpeg,.png,.webp,.gif,.bmp,.tif,.tiff,.heic,.heif,${CAMERA_RAW_ACCEPT}`}
         onChange={(event) =>
-          setPendingImportFiles(Array.from(event.target.files ?? []))
+          queueImportFiles(Array.from(event.target.files ?? []))
         }
       />
       <input
@@ -2673,11 +2778,18 @@ export default function App() {
             photos={photos}
             photo={previewPhoto}
             source={source}
+            importGroups={importGroups}
+            onDeleteImport={removeImport}
+            importActionsDisabled={catalogActionsDisabled}
             collections={collections}
             snapshots={activePhoto?.snapshots ?? []}
             historyCount={activeHistory?.past.length ?? 0}
             onSourceChange={(nextSource) => {
+              commitEdit();
               setSource(nextSource);
+              setSelectedIds(new Set());
+              setSearch("");
+              setMinimumRating(0);
               setMode("library");
             }}
             onCreateCollection={handleCreateCollection}
@@ -2816,11 +2928,19 @@ export default function App() {
                   <button type="button" onClick={() => void handleFolderImport()}>
                     <FolderOpen size={13} /> Folder…
                   </button>
-                  <button type="button" disabled={!activePhoto} onClick={() => setShowExport(true)}>
+                  <button type="button" disabled={!activePhoto || catalogActionsDisabled} onClick={() => setShowExport(true)}>
                     <Download size={13} /> Export…
                   </button>
+                  <button type="button" disabled={!filteredPhotos.length || catalogActionsDisabled}
+                    onClick={selectAllVisible} title="Select all photos in this view (⌘/Ctrl+A)">
+                    <Check size={13} /> Select all
+                  </button>
+                  <button type="button" disabled={!selectedIds.size || catalogActionsDisabled}
+                    onClick={() => removeContextPhotos([...selectedIds])}>
+                    <Trash2 size={13} /> Delete selected{selectedIds.size ? ` (${selectedIds.size})` : ""}…
+                  </button>
                 </div>
-                <span>{selectedIds.size || filteredPhotos.length} selected / {filteredPhotos.length} photographs</span>
+                <span>{selectedIds.size} selected / {filteredPhotos.length} photographs</span>
               </div>
             </>
           ) : activePhoto ? (
@@ -3038,6 +3158,26 @@ export default function App() {
           items={contextMenuItems}
           onClose={() => setFilmstripMenu(null)}
         />
+      ) : null}
+
+      {pendingDeletion ? (
+        <Modal
+          title={pendingDeletion.importId ? "Delete this import?" : `Delete ${pendingDeletion.ids.length === 1 ? "this photo" : `${pendingDeletion.ids.length} photos`}?`}
+          description={pendingDeletion.label}
+          size="small"
+          onClose={() => { if (!deletingPhotos) setPendingDeletion(null); }}
+          footer={<>
+            <button type="button" className="button button--quiet" disabled={deletingPhotos}
+              onClick={() => setPendingDeletion(null)}>Cancel</button>
+            <button type="button" className="button button--primary" disabled={deletingPhotos}
+              onClick={() => void confirmPhotoDeletion()}>
+              {deletingPhotos ? "Deleting…" : `Delete ${pendingDeletion.ids.length} ${pendingDeletion.ids.length === 1 ? "photo" : "photos"}`}
+            </button>
+          </>}
+        >
+          <p>This removes {pendingDeletion.ids.length} {pendingDeletion.ids.length === 1 ? "photo" : "photos"}, including saved edits and cached previews, from this browser’s local catalog.</p>
+          <p>Your original files on disk stay untouched. This cannot be undone.</p>
+        </Modal>
       ) : null}
 
       {loading ? (

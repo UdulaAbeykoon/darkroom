@@ -4,7 +4,6 @@ import {
   Check,
   ChevronDown,
   ChevronRight,
-  Clock3,
   FolderHeart,
   FolderPlus,
   History,
@@ -19,6 +18,8 @@ import {
 } from "lucide-react";
 import { BUILT_IN_PRESETS } from "../defaults";
 import { useDevelopedPreview } from "../hooks/useDevelopedPreview";
+import type { ImportGroup } from "../lib/importHistory";
+import ImportHistory from "./ImportHistory";
 import type {
   Collection,
   DevelopPreset,
@@ -75,12 +76,18 @@ function LibrarySidebar({
   collections,
   onSourceChange,
   onCreateCollection,
+  importGroups,
+  onDeleteImport,
+  importActionsDisabled,
 }: {
   photos: PhotoRecord[];
   source: string;
   collections: Collection[];
   onSourceChange: (source: string) => void;
   onCreateCollection: (name: string) => void;
+  importGroups: ImportGroup[];
+  onDeleteImport: (groupId: string) => void;
+  importActionsDisabled?: boolean;
 }) {
   const [creating, setCreating] = useState(false);
   const [name, setName] = useState("");
@@ -99,12 +106,12 @@ function LibrarySidebar({
           active={source === "all"}
           onClick={() => onSourceChange("all")}
         />
-        <NavItem
-          icon={Clock3}
-          label="Previous Import"
-          count={photos.filter((photo) => Date.now() - Date.parse(photo.importedAt) < 86_400_000).length}
-          active={source === "recent"}
-          onClick={() => onSourceChange("recent")}
+        <ImportHistory
+          imports={importGroups}
+          source={source}
+          onSourceChange={onSourceChange}
+          onDeleteImport={onDeleteImport}
+          disabled={importActionsDisabled}
         />
         <NavItem
           icon={Check}
@@ -455,6 +462,9 @@ export default function LeftSidebar({
   onCopySettings,
   onPasteSettings,
   canPasteSettings,
+  importGroups,
+  onDeleteImport,
+  importActionsDisabled,
 }: {
   mode: WorkspaceMode;
   photos: PhotoRecord[];
@@ -477,6 +487,9 @@ export default function LeftSidebar({
   onCopySettings: () => void;
   onPasteSettings: () => void;
   canPasteSettings: boolean;
+  importGroups: ImportGroup[];
+  onDeleteImport: (groupId: string) => void;
+  importActionsDisabled?: boolean;
 }) {
   return (
     <aside className="left-sidebar">
@@ -508,6 +521,9 @@ export default function LeftSidebar({
           collections={collections}
           onSourceChange={onSourceChange}
           onCreateCollection={onCreateCollection}
+          importGroups={importGroups}
+          onDeleteImport={onDeleteImport}
+          importActionsDisabled={importActionsDisabled}
         />
       )}
     </aside>
