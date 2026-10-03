@@ -1,0 +1,12 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>Import history browser checks</title>
+<style>
+#checks { position:fixed;z-index:10000;right:12px;top:12px;max-width:500px;padding:16px;background:#202020;color:#eee;border:1px solid #666;font:13px system-ui;pointer-events:none; }
+#checks li {margin:4px 0} #checks .fail{color:#ff9d9d} #checks .pass{color:#b5debf}
+</style>
+<div id="root"></div>
+<aside id="checks"><strong id="status">Running import history checks…</strong><ol id="results"></ol></aside>
+<script type="module" src="./import-history.tsx"></script>
+</html>

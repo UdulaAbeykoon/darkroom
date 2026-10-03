@@ -1,0 +1,35 @@
+.app-shell .classic-library-footer {
+  flex-wrap: wrap;
+  row-gap: 6px;
+}
+
+.app-shell .classic-library-footer > div {
+  flex-wrap: wrap;
+}
+
+.app-shell .classic-library-footer button {
+  white-space: nowrap;
+}
+
+.app-shell .library-toolbar__title {
+  min-width: 90px;
+  max-width: 250px;
+}
+
+.app-shell .library-toolbar__title strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.app-shell .left-sidebar--library {
+  overflow-y: auto;
+}
+
+.app-shell .left-sidebar--library > .sidebar-section {
+  flex-shrink: 0;
+}
+
+.app-shell .left-sidebar--library > .sidebar-section--grow {
+  min-height: auto;
+}
