@@ -369,6 +369,8 @@ export interface PhotoRecord {
   importMethod?: ImportMethod;
   /** Browser-decodable working image when `blob` is a camera RAW original. */
   renderBlob?: Blob;
+  /** Browsing proxies must never silently become export sources. */
+  renderKind?: "embedded-preview" | "full-resolution" | "camera-jpeg";
   blob: Blob;
   objectUrl: string;
   thumbnailUrl: string;
@@ -404,6 +406,8 @@ export interface DevelopPreset {
 }
 
 export interface ExportSettings {
+  /** Download the exact imported bytes, without edits or metadata removal. */
+  original?: boolean;
   format: "image/jpeg" | "image/png" | "image/webp";
   quality: number;
   resizeMode: "original" | "long-edge" | "dimensions";

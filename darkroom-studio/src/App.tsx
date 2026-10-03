@@ -1,3 +1,4 @@
+import ImportProgressPanel from "./components/ImportProgressPanel";
 import {
   lazy,
   Suspense,
@@ -91,7 +92,7 @@ import "./import-management.css";
 import { ImageEngine } from "./lib/imageEngine";
 import { solveGuidedUpright } from "./lib/guidedUpright";
 import { applyPresetAtAmount } from "./lib/presetMath";
-import { CAMERA_RAW_ACCEPT, renderBlobForPhoto } from "./lib/rawImage";
+import { CAMERA_RAW_ACCEPT, fullRenderBlobForPhoto, renderBlobForPhoto } from "./lib/rawImage";
 import { mergeSynchronizedSettings } from "./lib/syncSettings";
 import { CROP_OVERLAY_SEQUENCE } from "./types";
 import {
@@ -314,6 +315,7 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [importing, setImporting] = useState(false);
   const [pendingImportFiles, setPendingImportFiles] = useState<File[]>([]);
+  const importAbortRef = useRef<AbortController | null>(null);
   const [importProgress, setImportProgress] = useState<ImportProgress | null>(null);
   const [importFailures, setImportFailures] = useState<
     { name: string; reason: string }[]
@@ -825,11 +827,15 @@ export default function App() {
       if (!files.length || catalogOperationRef.current) return;
       catalogOperationRef.current = true;
       setImporting(true);
+      const abort = new AbortController();
+      importAbortRef.current = abort;
       setImportFailures([]);
       try {
-        const result = await importFiles(files, options, setImportProgress);
+        const result = await importFiles(files, options, setImportProgress, {
+          signal: abort.signal,
+          onPhotos: (batch) => setPhotosSafe((current) => [...batch, ...current]),
+        });
         if (result.photos.length) {
-          setPhotosSafe((current) => [...result.photos, ...current]);
           setSource(`import:${getPhotoImportGroupId(result.photos[0])}`);
           setSearch("");
           setMinimumRating(0);
@@ -838,7 +844,7 @@ export default function App() {
           setSelectedIds(new Set(result.photos.map((photo) => photo.id)));
           lastSelectedRef.current = result.photos[0].id;
           notify(
-            `${result.photos.length} ${result.photos.length === 1 ? "photo" : "photos"} imported.`,
+            `${result.photos.length} ${result.photos.length === 1 ? "photo" : "photos"} imported${abort.signal.aborted ? " before stopping" : ""}.`,
             "success",
           );
         }
@@ -853,6 +859,7 @@ export default function App() {
         notify(error instanceof Error ? error.message : "Import failed.", "error");
       } finally {
         catalogOperationRef.current = false;
+        importAbortRef.current = null;
         setImporting(false);
         setImportProgress(null);
         setPendingImportFiles([]);
@@ -2117,7 +2124,7 @@ export default function App() {
     let exported = 0;
     const failures: string[] = [];
     try {
-      controller = new ImageEngine(document.createElement("canvas"));
+      if (!exportSettings.original) controller = new ImageEngine(document.createElement("canvas"));
       const extension =
         exportSettings.format === "image/png"
           ? "png"
@@ -2133,8 +2140,8 @@ export default function App() {
           name: photo.name,
         });
         try {
-          const blob = await controller.export(
-            renderBlobForPhoto(photo),
+          const blob = exportSettings.original ? photo.blob : await controller!.export(
+            await fullRenderBlobForPhoto(photo),
             photo.edits,
             exportSettings,
           );
@@ -2146,7 +2153,7 @@ export default function App() {
               ? exportSettings.fileName || `${withoutExtension(photo.name)}_edit`
               : `${exportSettings.fileName || "Darkroom_export"}_${String(index + 1).padStart(3, "0")}_${withoutExtension(photo.name)}`;
           anchor.href = url;
-          anchor.download = `${fileName}.${extension}`;
+          anchor.download = exportSettings.original ? photo.name : `${fileName}.${extension}`;
           anchor.click();
           window.setTimeout(() => URL.revokeObjectURL(url), 30_000);
           exported += 1;
@@ -2168,7 +2175,7 @@ export default function App() {
         );
       } else if (exported) {
         notify(
-          `${exported} ${exported === 1 ? "photo" : "photos"} rendered; browser downloads were requested.`,
+          `${exported} ${exported === 1 ? "photo" : "photos"} ${exportSettings.original ? "preserved as originals" : "rendered"}; browser downloads were requested.`,
           failures.length ? "info" : "success",
         );
       }
@@ -2975,6 +2982,7 @@ export default function App() {
               zoom={zoom}
               onZoomChange={setZoom}
               onHistogram={updateHistogram}
+              onSourceDimensions={(id, width, height) => updatePhoto(id, (item) => ({ ...item, width, height }), true)}
               onEngineReady={(engine) => {
                 engineRef.current = engine;
               }}
@@ -3199,19 +3207,7 @@ export default function App() {
       ) : null}
 
       {importing ? (
-        <div className="import-progress" role="status">
-          <div>
-            <span className="spinner" />
-            <strong>Importing {importProgress?.fileName ?? "photos"}</strong>
-          </div>
-          <span>
-            {importProgress?.completed ?? 0} / {importProgress?.total ?? 0}
-          </span>
-          <progress
-            max={importProgress?.total ?? 1}
-            value={importProgress?.completed ?? 0}
-          />
-        </div>
+        <ImportProgressPanel progress={importProgress} onCancel={() => importAbortRef.current?.abort()} />
       ) : null}
 
       {importFailures.length ? (

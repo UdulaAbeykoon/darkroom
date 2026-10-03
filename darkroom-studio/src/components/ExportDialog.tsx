@@ -63,16 +63,16 @@ export default function ExportDialog({
     Math.min(1, Math.max(0.1, settings.watermarkOpacity)) * 100,
   );
   const fullSizeActive =
-    settings.format === "image/jpeg" &&
+    !settings.original && settings.format === "image/jpeg" &&
     settings.resizeMode === "original" &&
     qualityPercent === 90;
   const webPresetActive =
-    settings.format === "image/jpeg" &&
+    !settings.original && settings.format === "image/jpeg" &&
     settings.resizeMode === "long-edge" &&
     settings.longEdge === 2048 &&
     qualityPercent === 85;
   const emailActive =
-    settings.format === "image/jpeg" &&
+    !settings.original && settings.format === "image/jpeg" &&
     settings.resizeMode === "long-edge" &&
     settings.longEdge === 1024 &&
     qualityPercent === 60;
@@ -84,6 +84,7 @@ export default function ExportDialog({
   const applyFullSizePreset = () => {
     onChange({
       ...settings,
+      original: false,
       format: "image/jpeg",
       quality: 0.9,
       resizeMode: "original",
@@ -93,6 +94,7 @@ export default function ExportDialog({
   const applyEmailPreset = () => {
     onChange({
       ...settings,
+      original: false,
       format: "image/jpeg",
       quality: 0.6,
       resizeMode: "long-edge",
@@ -103,6 +105,7 @@ export default function ExportDialog({
   const applyWebPreset = () => {
     onChange({
       ...settings,
+      original: false,
       format: "image/jpeg",
       quality: 0.85,
       resizeMode: "long-edge",
@@ -192,9 +195,14 @@ export default function ExportDialog({
             <p className="lrc-export-note">
               Files are saved using your browser’s download settings.
             </p>
+          <label className="lrc-export-original">
+            <input type="checkbox" checked={settings.original ?? false} disabled={exporting}
+              onChange={(event) => onChange({ ...settings, original: event.target.checked })} />
+            Download unchanged originals (all original quality and metadata; no edits)
+          </label>
+          {!settings.original && <p className="lrc-export-note">PNG preserves rendered pixels without lossy compression. JPEG and WebP use the selected quality. Rendered exports use 8-bit sRGB.</p>}
           </div>
-
-          <div className="lrc-export-sections">
+          {settings.original ? <div className="lrc-export-sections"><p className="lrc-export-note">Original filenames and file formats are preserved.</p></div> : <div className="lrc-export-sections">
             <ExportSection title="File Naming" defaultOpen>
               <div className="lrc-export-form-grid">
                 <label className="lrc-export-control">
@@ -416,7 +424,7 @@ export default function ExportDialog({
                 </label>
               </div>
             </ExportSection>
-          </div>
+          </div>}
         </main>
       </div>
     </Modal>

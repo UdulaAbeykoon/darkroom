@@ -173,3 +173,11 @@ direct GPU geometry. Raster caches are bounded; undo, recipe replacement, image
 loading, and graphics-context restoration invalidate the affected cache. Preview
 revision tokens share immutable subtrees so local sliders do not serialize old
 brush strokes on every frame.
+
+## RAW import performance
+
+Camera RAW imports use embedded browsing previews while preserving exact original
+bytes. Develop and rendered export decode the original at full resolution on
+demand. Import displays live stages and saved/skipped counts, and can stop after
+the current photo. Export supports unchanged-original downloads; PNG avoids lossy
+rendered compression. See [performance measurements and quality boundaries](docs/raw-import-performance.md).

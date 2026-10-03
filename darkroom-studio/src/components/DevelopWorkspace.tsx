@@ -18,7 +18,7 @@ import { ImageEngine, type RenderOptions } from "../lib/imageEngine";
 import { useDevelopedPreview } from "../hooks/useDevelopedPreview";
 import { constrainGradientPoint, radialLocalPoint, radialPoint, linearMetrics, linearFromCenter } from "../lib/maskGeometry";
 import { getMaskComponents } from "../lib/maskMath";
-import { renderBlobForPhoto } from "../lib/rawImage";
+import { fullRenderBlobForPhoto } from "../lib/rawImage";
 import type {
   BrushPoint,
   BrushStroke,
@@ -68,6 +68,7 @@ type Props = {
   onZoomChange: (zoom: number) => void;
   onHistogram: (histogram: HistogramData) => void;
   onEngineReady: (engine: ImageEngine | null) => void;
+  onSourceDimensions?: (id: string, width: number, height: number) => void;
   onToggleOriginal: () => void;
   onToggleMaskOverlay: () => void;
   onBeginEdit: () => void;
@@ -932,11 +933,16 @@ export default function DevelopWorkspace(props: Props) {
       window.clearTimeout(histogramTimerRef.current);
       histogramTimerRef.current = null;
     }
-    const renderBlob = renderBlobForPhoto(photo);
-    void engine
-      .load(renderBlob)
-      .then(() => {
+    void fullRenderBlobForPhoto(photo, true)
+      .then((blob) => {
         if (token !== loadTokenRef.current) return;
+        return engine.load(blob);
+      })
+      .then((info) => {
+        if (token !== loadTokenRef.current) return;
+        if (info && (info.sourceWidth !== photo.width || info.sourceHeight !== photo.height)) {
+          propsRef.current.onSourceDimensions?.(photo.id, info.sourceWidth, info.sourceHeight);
+        }
         loadedRef.current = true;
         loadedPhotoIdRef.current = photo.id;
         setLoaded(true);

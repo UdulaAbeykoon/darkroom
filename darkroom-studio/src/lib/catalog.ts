@@ -3,6 +3,7 @@ import { normalizeMasks } from "./maskMath";
 import { normalizeImportBatch } from "./importHistory";
 import {
   cameraRawInfo,
+  importCameraRaw,
   decodeCameraRaw,
   renderBlobForPhoto,
 } from "./rawImage";
@@ -75,6 +76,12 @@ export interface ImportProgress {
   fileName: string;
   status: "processing" | "imported" | "rejected";
   reason?: string;
+  phase?: string;
+  imported?: number;
+  rejected?: number;
+  completedBytes?: number;
+  totalBytes?: number;
+  startedAt?: number;
 }
 
 export type ImportProgressCallback = (progress: ImportProgress) => void;
@@ -141,6 +148,7 @@ interface ClassifiedImage {
 }
 
 interface DecodedImage {
+  renderKind?: PhotoRecord["renderKind"];
   width: number;
   height: number;
   thumbnailBlob: Blob;
@@ -935,6 +943,8 @@ async function getStoredContentFingerprints(): Promise<Set<string>> {
   }
 }
 
+class CatalogStorageFullError extends Error {}
+
 async function putStoredPhotos(
   records: StoredPhoto[],
   updateExistingOnly = false,
@@ -965,7 +975,7 @@ async function putStoredPhotos(
       error instanceof DOMException &&
       (error.name === "QuotaExceededError" || error.name === "UnknownError")
     ) {
-      throw new Error(
+      throw new CatalogStorageFullError(
         "The photo could not be saved because browser storage is full. Export any edits you need before clearing space.",
       );
     }
@@ -1238,23 +1248,22 @@ async function decodeImage(
   const failures: string[] = [];
 
   if (classification.format === "raw") {
-    const raw = await decodeCameraRaw(file);
+    let raw = await importCameraRaw(file);
     let decoded: DecodedImage;
+    const browserFormat = { format: "jpeg" as const, mimeType: "image/jpeg", bestEffort: false };
     try {
-      decoded = await decodeWithImageBitmap(raw.blob);
+      decoded = await decodeImage(raw.blob, browserFormat);
     } catch (error) {
-      failures.push(errorMessage(error));
-      try {
-        decoded = await decodeWithImageElement(raw.blob);
-      } catch (fallbackError) {
-        failures.push(errorMessage(fallbackError));
-        throw new Error(
-          `The camera RAW was decoded, but its working image could not be opened (${failures.join("; ")}).`,
-        );
-      }
+      if (raw.renderKind !== "embedded-preview") throw error;
+      // A valid TIFF directory does not guarantee an intact embedded JPEG.
+      raw = await decodeCameraRaw(file);
+      decoded = await decodeImage(raw.blob, browserFormat);
     }
     return {
       ...decoded,
+      width: raw.width,
+      height: raw.height,
+      renderKind: raw.renderKind,
       renderBlob: raw.blob,
       metadata: raw.metadata,
     };
@@ -1407,13 +1416,14 @@ export async function importFiles(
   files: File[],
   optionsOrProgress: Partial<ImportOptions> | ImportProgressCallback = {},
   progressCallback?: ImportProgressCallback,
+  control: { signal?: AbortSignal; onPhotos?: (photos: PhotoRecord[]) => void } = {},
 ): Promise<FileImportResult> {
   const generation = catalogGeneration;
   const importBatch: ImportBatch = {
     id: makeId("import"),
     importedAt: new Date().toISOString(),
   };
-  await initialize();
+  const startedAt = Date.now();
 
   const options = normalizeImportOptions(
     typeof optionsOrProgress === "function" ? {} : optionsOrProgress,
@@ -1422,21 +1432,37 @@ export async function importFiles(
     typeof optionsOrProgress === "function"
       ? optionsOrProgress
       : progressCallback;
+  reportProgress(onProgress, { completed: 0, total: files.length, fileName: "photos", status: "processing", phase: "Opening catalog", startedAt });
+  await initialize();
   const contentFingerprints = await getStoredContentFingerprints();
   const imported: PhotoRecord[] = [];
   const rejected: FileImportResult["rejected"] = [];
   const total = files.length;
+  const totalBytes = files.reduce((sum, file) => sum + file.size, 0);
+  let completedBytes = 0;
+  let delivered = 0;
+  let deliveredAt = Date.now();
+  const deliver = () => {
+    if (generation !== catalogGeneration || delivered === imported.length) return;
+    const batch = imported.slice(delivered);
+    delivered = imported.length;
+    deliveredAt = Date.now();
+    try { control.onPhotos?.(batch); } catch { /* Advisory UI callback. */ }
+  };
 
   for (let index = 0; index < files.length; index += 1) {
+    if (control.signal?.aborted || generation !== catalogGeneration) break;
     const file = files[index];
-    reportProgress(onProgress, {
-      completed: index,
-      total,
-      fileName: file.name,
-      status: "processing",
+    const progress = (phase: string) => reportProgress(onProgress, {
+      completed: index, total, fileName: file.name, status: "processing", phase,
+      imported: imported.length, rejected: rejected.length, completedBytes, totalBytes, startedAt,
     });
+    progress("Checking original and duplicates");
+    // Let the browser paint before heavy work or a long SD-card read.
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
 
     let rejectionReason: string | undefined;
+    let storageFull = false;
 
     try {
       if (generation !== catalogGeneration) {
@@ -1467,6 +1493,7 @@ export async function importFiles(
         throw new Error("Already in the catalog (matching image content).");
       }
 
+      progress("Reading preview and metadata");
       const [decoded, parsedMetadata] = await Promise.all([
         decodeImage(file, classification),
         readMetadata(file),
@@ -1493,6 +1520,7 @@ export async function importFiles(
         importMethod: options.method,
         blob: catalogBlob,
         renderBlob: decoded.renderBlob,
+        renderKind: decoded.renderKind,
         thumbnailBlob: decoded.thumbnailBlob,
         lastModified: file.lastModified,
         fingerprint,
@@ -1507,6 +1535,7 @@ export async function importFiles(
         snapshots: [],
       };
 
+      progress("Saving original to catalog");
       await enqueueCatalogWrite(async () => {
         if (generation !== catalogGeneration) {
           throw new Error("Import stopped because the catalog was emptied.");
@@ -1514,21 +1543,32 @@ export async function importFiles(
         await putStoredPhotos([storedPhoto]);
       });
       contentFingerprints.add(sourceFingerprint);
-      imported.push(materializePhoto(storedPhoto));
+      // Read back the committed copy so removing the SD card cannot invalidate
+      // a File handle retained by the UI before the next catalog reload.
+      const persisted = (await getStoredPhotosByIds([id])).get(id);
+      if (!persisted) throw new Error("The saved original could not be read back.");
+      imported.push(materializePhoto(persisted));
     } catch (error) {
-      rejectionReason = errorMessage(error);
+      storageFull = error instanceof CatalogStorageFullError;
+      rejectionReason = errorMessage(error) + (storageFull ? ` Import stopped; ${total - index - 1} remaining files were not attempted.` : "");
       rejected.push({ name: file?.name || "Unnamed file", reason: rejectionReason });
     }
 
+    completedBytes += file.size;
+    if (imported.length - delivered >= 8 || Date.now() - deliveredAt >= 250) deliver();
     reportProgress(onProgress, {
+      imported: imported.length, rejected: rejected.length, completedBytes, totalBytes, startedAt,
+      phase: rejectionReason ? "Skipped" : "Saved",
       completed: index + 1,
       total,
       fileName: file?.name || "Unnamed file",
       status: rejectionReason ? "rejected" : "imported",
       reason: rejectionReason,
     });
+    if (storageFull) break;
   }
 
+  deliver();
   return {
     photos: generation === catalogGeneration ? imported : [],
     rejected,
@@ -1583,6 +1623,7 @@ async function storedPhotoFromPublic(
     blob: photo.blob,
     renderBlob:
       photo.renderBlob instanceof Blob ? photo.renderBlob : existing?.renderBlob,
+    renderKind: photo.renderKind ?? existing?.renderKind,
     thumbnailBlob,
     lastModified,
     fingerprint:

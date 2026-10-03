@@ -1,7 +1,9 @@
+import { createDefaultEditState } from "../defaults";
 import type { EditState, PhotoRecord } from "../types";
 import { ImageEngine, orientedFrameDimensions } from "./imageEngine";
-import { renderBlobForPhoto } from "./rawImage";
+import { fullRenderBlobForPhoto, renderBlobForPhoto } from "./rawImage";
 
+const defaultPreviewEdits = createDefaultEditState();
 const MAX_CONCURRENT_RENDERS = 2;
 const MAX_CACHE_ENTRIES = 48;
 const RELEASE_DELAY_MS = 30_000;
@@ -205,7 +207,9 @@ async function renderPreview(
 
   const { photo, maxDimension } = entry;
   renderer.sourcePhotoId = photo.id;
-  const renderBlob = renderBlobForPhoto(photo);
+  const renderBlob = editRevision(photo.edits) === editRevision(defaultPreviewEdits)
+    ? renderBlobForPhoto(photo)
+    : await fullRenderBlobForPhoto(photo, true);
   // Loading at roughly twice the output resolution keeps crop and mask edges
   // clean without decoding every original at full camera resolution.
   const sourceLimit = Math.min(4_096, Math.max(512, maxDimension * 2));

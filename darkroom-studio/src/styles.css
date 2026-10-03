@@ -8825,7 +8825,7 @@ body {
    low-contrast darkroom treatment instead of competing with the workspace. */
 .repo-star-card {
   position: fixed;
-  z-index: 1100;
+  z-index: 800;
   right: 16px;
   bottom: 16px;
   display: grid;
@@ -9167,3 +9167,8 @@ button.adjustment-slider__value:hover {
   height: 76px;
   flex-basis: 108px;
 }
+
+/* Long filenames and live byte counts stay readable during card imports. */
+.import-progress > div,
+.import-progress > span { grid-column: 1 / -1; }
+.import-progress > button { grid-column: 1 / -1; justify-self: end; }

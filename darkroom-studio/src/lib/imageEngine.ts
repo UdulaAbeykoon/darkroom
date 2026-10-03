@@ -2473,6 +2473,9 @@ export class ImageEngine {
     const exportEngine = new ImageEngine(renderCanvas);
     try {
       const info = await exportEngine.load(blob, Number.POSITIVE_INFINITY);
+      if (info.previewWidth !== info.sourceWidth || info.previewHeight !== info.sourceHeight) {
+        throw new Error("This image exceeds the GPU texture limit. Export the unchanged original to preserve its quality.");
+      }
       const crop = this.sanitizeCrop(editState);
       const cropWidth = info.sourceWidth * crop[2];
       const cropHeight = info.sourceHeight * crop[3];
@@ -2535,6 +2538,9 @@ export class ImageEngine {
           ? previewScale
           : 1,
       );
+      if (safeScale < 1) {
+        throw new Error("The requested export exceeds this browser’s full-quality rendering limit. Choose a smaller output size or export the unchanged original.");
+      }
       outputWidth = Math.max(1, Math.round(outputWidth * safeScale));
       outputHeight = Math.max(1, Math.round(outputHeight * safeScale));
 
