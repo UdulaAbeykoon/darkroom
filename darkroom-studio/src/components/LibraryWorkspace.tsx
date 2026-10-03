@@ -1,13 +1,16 @@
 import {
   Check,
   Flag,
-  ImageOff,
+  HardDrive,
+  Search,
   Star,
+  Upload,
   X,
 } from "lucide-react";
 import { memo } from "react";
 import { useDevelopedPreview } from "../hooks/useDevelopedPreview";
 import type { LibraryView, PhotoRecord } from "../types";
+import "./LibraryEmptyState.css";
 
 function formatFileSize(bytes: number) {
   if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
@@ -159,6 +162,7 @@ const LoupeView = memo(function LoupeView({
 
 export default function LibraryWorkspace({
   photos,
+  hasPhotos = false,
   activeId,
   selectedIds,
   view,
@@ -168,6 +172,7 @@ export default function LibraryWorkspace({
   onLoadSample,
 }: {
   photos: PhotoRecord[];
+  hasPhotos?: boolean;
   activeId: string | null;
   selectedIds: Set<string>;
   view: LibraryView;
@@ -177,30 +182,62 @@ export default function LibraryWorkspace({
   onLoadSample: () => void;
 }) {
   if (!photos.length) {
+    if (hasPhotos) {
+      return (
+        <main className="empty-library empty-library--filtered">
+          <div className="empty-library__search-icon" aria-hidden="true">
+            <Search size={24} strokeWidth={1.5} />
+          </div>
+          <h1>No photos in this view</h1>
+          <p className="empty-library__copy">
+            Try a different search, filter, or album to find your photos.
+          </p>
+        </main>
+      );
+    }
+
     return (
       <main className="empty-library">
-        <div className="empty-library__mark" aria-hidden="true">
-          <div />
-          <span />
+        <div className="empty-library__contact-sheet" aria-hidden="true">
+          <div className="empty-library__frame empty-library__frame--back">
+            <div className="empty-library__frame-image">
+              <span className="empty-library__mountain" />
+            </div>
+            <span className="empty-library__frame-line" />
+          </div>
+          <div className="empty-library__frame empty-library__frame--front">
+            <div className="empty-library__frame-image">
+              <span className="empty-library__sun" />
+              <span className="empty-library__mountain" />
+              <span className="empty-library__foreground" />
+            </div>
+            <span className="empty-library__frame-line" />
+            <span className="empty-library__frame-dot" />
+          </div>
+          <span className="empty-library__crop empty-library__crop--top" />
+          <span className="empty-library__crop empty-library__crop--bottom" />
         </div>
-        <p className="eyebrow">Your private catalog</p>
-        <h1>Bring the first frame into the light.</h1>
+        <h1>Your next great edit<br />starts here.</h1>
         <p className="empty-library__copy">
-          Originals stay untouched. Darkroom keeps edit instructions in your browser and only
-          creates a new file when you export.
+          A little light. A different perspective. Import your photos
+          and make every frame your own.
         </p>
         <div className="empty-library__actions">
           <button type="button" className="button button--primary" onClick={onImport}>
+            <Upload size={15} aria-hidden="true" />
             Import photos
           </button>
           <button type="button" className="button button--quiet" onClick={onLoadSample}>
-            Try the sample frame
+            Try a sample photo
           </button>
         </div>
         <div className="empty-library__formats">
-          <ImageOff size={14} />
-          <span>JPEG, PNG, WebP, DNG, CR2/CR3, NEF, ARW, RAF and more</span>
+          JPEG, PNG, WebP and RAW
         </div>
+        <p className="empty-library__privacy">
+          <HardDrive size={13} aria-hidden="true" />
+          Your photos stay on your device. Originals stay untouched.
+        </p>
       </main>
     );
   }

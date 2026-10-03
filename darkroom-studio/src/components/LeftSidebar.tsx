@@ -178,10 +178,6 @@ function LibrarySidebar({
           </form>
         ) : null}
       </div>
-      <div className="sidebar-section library-publish-services">
-        <div className="sidebar-section__title">Publish Services</div>
-        <p className="sidebar-muted">Hard Drive</p>
-      </div>
       <div className="storage-note">
         <Archive size={14} />
         <div>
@@ -270,7 +266,6 @@ function DevelopSidebar({
       <section className="navigator-panel" aria-label="Navigator">
         <header>
           <strong>Navigator</strong>
-          <span>FIT&nbsp;&nbsp; 100%&nbsp;&nbsp; 1:1</span>
         </header>
         <div className="navigator-panel__preview">
           {photo ? <NavigatorPreview photo={photo} /> : null}
