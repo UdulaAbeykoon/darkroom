@@ -2,42 +2,14 @@
   padding-top: 9px;
 }
 
-.calibration-panel__process {
-  display: grid;
-  grid-template-columns: 67px minmax(0, 1fr);
-  align-items: center;
-  gap: 7px;
-  padding-bottom: 10px;
-  color: #bcbcbc;
-  font-size: 9px;
-}
-
-.calibration-panel__process select {
-  width: 100%;
-  min-width: 0;
-  height: 22px;
-  padding: 0 22px 0 7px;
-  border: 1px solid #4a4a4a;
-  border-radius: 2px;
-  color: #c8c8c8;
-  background: #292929;
-  font: inherit;
-  color-scheme: dark;
-}
-
-.calibration-panel__process select:hover {
-  border-color: #666;
-  background-color: #303030;
-}
-
-.calibration-panel__process select:focus-visible {
-  outline: 1px solid #9ac7e8;
-  outline-offset: 1px;
-}
-
 .calibration-panel__group {
   padding: 8px 0 10px;
   border-top: 1px solid #303030;
+}
+
+.calibration-panel__group:first-child {
+  padding-top: 0;
+  border-top: 0;
 }
 
 .calibration-panel__group:last-child {

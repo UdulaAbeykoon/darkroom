@@ -1,7 +1,6 @@
 import {
   Eye,
   EyeOff,
-  Grid2X2,
   Maximize,
   Minus,
   Plus,
@@ -2527,7 +2526,6 @@ export default function DevelopWorkspace(props: Props) {
               onClick={props.onToggleMaskOverlay}
             />
           ) : null}
-          <IconButton icon={Grid2X2} label="Grid overlay" disabled />
         </div>
         <div className="canvas-toolbar__right">
           <IconButton

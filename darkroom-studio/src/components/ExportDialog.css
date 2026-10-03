@@ -518,11 +518,6 @@
   color: #555;
 }
 
-.lrc-export-footer__preset-actions {
-  display: flex;
-  gap: 5px;
-}
-
 .modal:has(.lrc-export-workspace) .modal__footer .button {
   min-width: 69px;
   min-height: 27px;
@@ -546,10 +541,6 @@
   color: #8b8b8b;
   border-color: #b2b2b2;
   opacity: 0.7;
-}
-
-.modal:has(.lrc-export-workspace) .lrc-export-footer__plugin {
-  min-width: 119px;
 }
 
 .lrc-export-footer__spacer {
@@ -645,9 +636,6 @@
     padding-left: 109px;
   }
 
-  .lrc-export-footer__plugin {
-    display: none;
-  }
 }
 
 @media (max-width: 610px) {
@@ -693,9 +681,6 @@
     max-width: none;
   }
 
-  .lrc-export-footer__preset-actions {
-    display: none;
-  }
 }
 
 @media (max-width: 460px) {
@@ -725,5 +710,45 @@
 @media (prefers-reduced-motion: reduce) {
   .lrc-export-section > summary > svg {
     transition: none;
+  }
+}
+
+/* Keep the supported presets and fixed download behavior easy to scan. */
+.lrc-export-workspace .lrc-export-presets__list {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-content: start;
+  gap: 4px;
+}
+
+.lrc-export-workspace .lrc-export-preset {
+  padding-left: 10px;
+}
+
+.lrc-export-workspace .lrc-export-note {
+  margin: 0;
+  color: var(--brand-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.lrc-export-workspace .lrc-export-target > .lrc-export-note {
+  grid-column: 1 / -1;
+  width: 100%;
+}
+
+@media (max-width: 610px) {
+  .modal .lrc-export-workspace {
+    grid-template-rows: 98px minmax(0, 1fr);
+  }
+
+  .lrc-export-workspace .lrc-export-presets__list {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .lrc-export-workspace .lrc-export-preset {
+    padding: 7px 5px;
+    text-align: center;
+    white-space: normal;
   }
 }

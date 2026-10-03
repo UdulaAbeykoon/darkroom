@@ -97,24 +97,6 @@ export function CalibrationPanel({
         </button>
       }
     >
-      <div className="calibration-panel__process">
-        <label htmlFor={`${headingId}-process`}>Process</label>
-        <select
-          id={`${headingId}-process`}
-          value={value.processVersion}
-          onChange={(event) => {
-            onBegin();
-            onChange({
-              ...value,
-              processVersion: event.currentTarget.value as CalibrationAdjustments["processVersion"],
-            });
-            onCommit();
-          }}
-        >
-          <option value="6">Version 6 (Current)</option>
-        </select>
-      </div>
-
       <div
         className="calibration-panel__group calibration-panel__group--shadows"
         role="group"

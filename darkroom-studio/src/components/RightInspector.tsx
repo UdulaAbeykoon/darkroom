@@ -189,6 +189,7 @@ type InspectorProps = {
   onOverlayOpacityChange: (opacity: number) => void;
   onResetSection: (keys: (keyof GlobalAdjustments)[]) => void;
   onPreviousSettings: () => void;
+  canApplyPreviousSettings: boolean;
   onSyncSettings: () => void;
   syncCount: number;
   onMetadataChange: (patch: Partial<PhotoMetadata>) => void;
@@ -387,7 +388,6 @@ function EditInspector(props: InspectorProps) {
         <div className="basic-mode-actions">
           <button type="button" onClick={props.onAutoAdjust}>Auto</button>
           <button type="button" onClick={() => props.onProfileChange("Darkroom Monochrome")}>B&amp;W</button>
-          <button type="button" disabled title="HDR merge requires bracketed source files">HDR</button>
         </div>
         <div className="profile-row profile-row--classic">
           <span>Profile</span>
@@ -2261,11 +2261,12 @@ export default function RightInspector(props: InspectorProps) {
         ) : null}
       </div>
       <div className="inspector-footer" aria-label="Develop settings actions">
-        <button type="button" onClick={props.onPreviousSettings}>Previous</button>
+        <button type="button" disabled={!props.canApplyPreviousSettings} onClick={props.onPreviousSettings}>Previous</button>
         <button type="button" onClick={props.onResetEdits}>Reset</button>
         <button
           type="button"
           className="inspector-footer__sync"
+          disabled={!props.syncCount}
           onClick={props.onSyncSettings}
           title={props.syncCount ? `Synchronize ${props.syncCount} selected photographs` : "Select multiple photographs to synchronize"}
         >

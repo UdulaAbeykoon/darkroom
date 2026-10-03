@@ -39,12 +39,9 @@ function inferMake(metadata: PhotoMetadata) {
 
 function ProfileValue({ children }: { children: string }) {
   return (
-    <output className="lens-corrections__profile-value" title={children}>
-      <span>{children}</span>
-      <span aria-hidden="true" className="lens-corrections__profile-chevron">
-        ▾
-      </span>
-    </output>
+    <dd className="lens-corrections__profile-readout" title={children}>
+      {children}
+    </dd>
   );
 }
 
@@ -154,7 +151,6 @@ export function LensCorrectionsPanel({
   const [tab, setTab] = useState<PanelTab>("profile");
   const make = inferMake(metadata);
   const model = metadata.lens ?? "Unknown lens";
-  const profile = metadata.lens ? "Generic browser correction" : "None";
 
   const update = <Key extends keyof LensCorrections>(
     key: Key,
@@ -235,25 +231,22 @@ export function LensCorrectionsPanel({
           </label>
 
           <section
-            className={`lens-corrections__section lens-corrections__profile ${
-              value.enableProfileCorrections ? "" : "is-disabled"
-            }`}
+            className="lens-corrections__section lens-corrections__profile"
             aria-label="Lens profile"
-            aria-disabled={!value.enableProfileCorrections}
           >
             <h4>Lens Profile</h4>
-            <div className="lens-corrections__profile-grid">
-              <span>Make</span>
+            <dl className="lens-corrections__profile-grid">
+              <dt>Make</dt>
               <ProfileValue>{make}</ProfileValue>
-              <span>Model</span>
+              <dt>Model</dt>
               <ProfileValue>{model}</ProfileValue>
-              <span>Profile</span>
-              <ProfileValue>{profile}</ProfileValue>
-            </div>
+              <dt>Profile</dt>
+              <ProfileValue>Generic browser correction</ProfileValue>
+            </dl>
             <p className="lens-corrections__profile-status">
-              {metadata.lens
-                ? "Generic profile correction applied."
-                : "No matching lens profile was found."}
+              {value.enableProfileCorrections
+                ? "Generic correction applied. No manufacturer profile is used."
+                : "Enable profile corrections to apply the generic correction."}
             </p>
           </section>
         </div>

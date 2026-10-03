@@ -5,10 +5,8 @@ import {
   Copy,
   FileImage,
   Files,
-  FolderOpen,
   HardDrive,
   Import,
-  MoveRight,
   Plus,
   ShieldCheck,
 } from "lucide-react";
@@ -98,32 +96,28 @@ function ImportMethod({
   detail,
   icon: Icon,
   active = false,
-  disabled = false,
   onClick,
 }: {
   label: string;
   detail: string;
   icon: typeof Copy;
   active?: boolean;
-  disabled?: boolean;
-  onClick?: () => void;
+  onClick: () => void;
 }) {
   return (
     <button
       type="button"
       className={`lrc-import-method ${active ? "is-active" : ""}`}
       aria-pressed={active}
-      aria-disabled={disabled}
-      disabled={disabled}
       onClick={onClick}
-      title={disabled ? `${label} is unavailable in a browser catalog` : detail}
+      title={detail}
     >
       <span className="lrc-import-method__icon">
         <Icon size={18} strokeWidth={1.55} aria-hidden="true" />
       </span>
       <span>
         <strong>{label}</strong>
-        <small>{disabled ? "Unavailable" : detail}</small>
+        <small>{detail}</small>
       </span>
     </button>
   );
@@ -279,7 +273,7 @@ export default function ImportDialog({
   return (
     <Modal
       title="Import Photos"
-      description="Choose a source, select an import method, and review the photos to add to the catalog."
+      description="Review the selected photos and choose how to add them to the catalog."
       size="large"
       onClose={onClose}
       footer={
@@ -339,18 +333,6 @@ export default function ImportDialog({
               <small>Browser-selected files</small>
             </span>
           </div>
-          <div className="lrc-import-source__tree" role="tree">
-            <button
-              type="button"
-              className="is-active"
-              role="treeitem"
-              aria-selected="true"
-            >
-              <FolderOpen size={14} strokeWidth={1.6} aria-hidden="true" />
-              <span>Selected source</span>
-              <small>{candidates.length}</small>
-            </button>
-          </div>
           <div className="lrc-import-source__summary">
             <Files size={15} aria-hidden="true" />
             <span>
@@ -369,23 +351,11 @@ export default function ImportDialog({
             <span className="lrc-import-methods__prompt">Import method</span>
             <div className="lrc-import-methods__choices">
               <ImportMethod
-                label="Copy as DNG"
-                detail="Convert and copy"
-                icon={FileImage}
-                disabled
-              />
-              <ImportMethod
                 label="Copy"
                 detail="Make managed copy"
                 icon={Copy}
                 active={importMethod === "copy"}
                 onClick={() => setImportMethod("copy")}
-              />
-              <ImportMethod
-                label="Move"
-                detail="Move to destination"
-                icon={MoveRight}
-                disabled
               />
               <ImportMethod
                 label="Add"
@@ -525,13 +495,6 @@ export default function ImportDialog({
 
         <aside className="lrc-import-settings" aria-label="Import settings">
           <SettingsPanel title="File Handling" open>
-            <label className="lrc-import-field">
-              <span>Build Previews</span>
-              <select value="browser" disabled>
-                <option value="browser">Browser standard</option>
-              </select>
-              <small>Preview size is optimized automatically.</small>
-            </label>
             <label className="lrc-import-check-row">
               <input
                 type="checkbox"
@@ -545,44 +508,9 @@ export default function ImportDialog({
                 <small>Verified with SHA-256 during import</small>
               </span>
             </label>
-            <label className="lrc-import-check-row is-unavailable">
-              <input type="checkbox" disabled />
-              <span>
-                <strong>Make a Second Copy To</strong>
-                <small>Requires direct folder write access</small>
-              </span>
-            </label>
           </SettingsPanel>
 
-          <SettingsPanel title="File Renaming">
-            <label className="lrc-import-check-row is-unavailable">
-              <input type="checkbox" disabled />
-              <span>
-                <strong>Rename Files</strong>
-                <small>Original filenames are preserved</small>
-              </span>
-            </label>
-            <label className="lrc-import-field is-unavailable">
-              <span>Template</span>
-              <select value="filename" disabled>
-                <option value="filename">Filename</option>
-              </select>
-            </label>
-          </SettingsPanel>
-
-          <SettingsPanel title="Apply During Import">
-            <label className="lrc-import-field is-unavailable">
-              <span>Develop Settings</span>
-              <select value="none" disabled>
-                <option value="none">None</option>
-              </select>
-            </label>
-            <label className="lrc-import-field is-unavailable">
-              <span>Metadata</span>
-              <select value="none" disabled>
-                <option value="none">None</option>
-              </select>
-            </label>
+          <SettingsPanel title="Keywords" open>
             <label className="lrc-import-field">
               <span>Keywords</span>
               <input
@@ -593,9 +521,6 @@ export default function ImportDialog({
               />
               <small>Applied to every imported photo.</small>
             </label>
-            <p className="lrc-import-panel__notice">
-              Develop settings and metadata presets can be applied after import.
-            </p>
           </SettingsPanel>
 
           <SettingsPanel title="Destination" open>

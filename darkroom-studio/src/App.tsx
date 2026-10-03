@@ -21,6 +21,7 @@ import {
   FolderOpen,
   Grid3X3,
   Import,
+  HardDrive,
   LayoutGrid,
   Maximize2,
   MonitorUp,
@@ -2663,6 +2664,14 @@ export default function App() {
             label="Catalog backup and restore"
             onClick={() => setShowCatalogBackup(true)}
           />
+          <span className="local-status" title="Photos and edits are stored on this device">
+            <HardDrive size={14} aria-hidden="true" />
+            <span>Local workspace</span>
+          </span>
+          <button type="button" className="button button--primary topbar-import" aria-label="Import photos" onClick={() => fileInputRef.current?.click()}>
+            <Import size={14} aria-hidden="true" />
+            <span>Import photos</span>
+          </button>
         </div>
       </header>
 
@@ -2800,6 +2809,7 @@ export default function App() {
               </div>
               <LibraryWorkspace
                 photos={filteredPhotos}
+                hasPhotos={photos.length > 0}
                 activeId={activeId}
                 selectedIds={selectedIds}
                 view={libraryView}
@@ -2820,7 +2830,7 @@ export default function App() {
                     <Download size={13} /> Export…
                   </button>
                 </div>
-                <span>{selectedIds.size || filteredPhotos.length} selected / {filteredPhotos.length} photographs</span>
+                <span>{selectedIds.size} selected / {filteredPhotos.length} photographs</span>
               </div>
             </>
           ) : activePhoto ? (
@@ -2875,7 +2885,7 @@ export default function App() {
           ) : null}
         </section>
 
-        {mode === "library" && panelsVisible ? (
+        {mode === "library" && panelsVisible && activePhoto ? (
           <LibraryInspector
             photo={activePhoto}
             histogram={null}
@@ -2989,6 +2999,7 @@ export default function App() {
             onMaskBrushSettingsChange={setMaskBrushSettings}
             onResetSection={resetSection}
             onPreviousSettings={applyPreviousSettings}
+            canApplyPreviousSettings={filteredPhotos.some((photo) => photo.id !== activePhoto.id)}
             onSyncSettings={openSyncSettingsDialog}
             syncCount={Math.max(0, selectedIds.size - (activeId && selectedIds.has(activeId) ? 1 : 0))}
             onMetadataChange={(patch) =>
@@ -3216,6 +3227,9 @@ export default function App() {
 
       {showGitHubStarReminder ? (
         <aside className="repo-star-card" aria-label="Support Darkroom on GitHub">
+          <button type="button" className="repo-star-card__dismiss" aria-label="Dismiss GitHub reminder" onClick={dismissGitHubStarReminder}>
+            <X size={14} aria-hidden="true" />
+          </button>
           <div className="repo-star-card__intro">
             <div className="repo-star-card__icon" aria-hidden="true">
               <Star size={16} fill="currentColor" />
@@ -3235,7 +3249,6 @@ export default function App() {
             <span>Star Darkroom on GitHub</span>
             <ArrowUpRight size={14} aria-hidden="true" />
           </a>
-          <small>This card disappears when you star the repo.</small>
         </aside>
       ) : null}
 
