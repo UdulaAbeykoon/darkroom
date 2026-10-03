@@ -26,6 +26,8 @@ type PreviewEntry = {
 type PreviewRenderer = {
   canvas: HTMLCanvasElement;
   engine: ImageEngine;
+  disposed: boolean;
+  sourcePhotoId: string | null;
   sourceBlob: Blob | null;
   sourceLimit: number;
   sourceInfo: {
@@ -45,6 +47,8 @@ const structuralRevisionMemo = new WeakMap<object, string>();
 const previewEntries = new Map<string, PreviewEntry>();
 const renderQueue: PreviewEntry[] = [];
 const availableRenderers: PreviewRenderer[] = [];
+const activeRenderers = new Map<PreviewRenderer, PreviewEntry>();
+const deletedPhotoIds = new Set<string>();
 let activeRenders = 0;
 
 const clamp = (value: number, min: number, max: number) =>
@@ -163,15 +167,29 @@ function acquireRenderer(): PreviewRenderer {
   return {
     canvas,
     engine: new ImageEngine(canvas),
+    disposed: false,
+    sourcePhotoId: null,
     sourceBlob: null,
     sourceLimit: 0,
     sourceInfo: null,
   };
 }
 
+function disposeRenderer(renderer: PreviewRenderer): void {
+  if (renderer.disposed) return;
+  renderer.disposed = true;
+  renderer.engine.destroy();
+  renderer.sourcePhotoId = null;
+  renderer.sourceBlob = null;
+  renderer.sourceInfo = null;
+  renderer.sourceLimit = 0;
+  renderer.canvas.width = 1;
+  renderer.canvas.height = 1;
+}
+
 function releaseRenderer(renderer: PreviewRenderer, broken = false): void {
-  if (broken) {
-    renderer.engine.destroy();
+  if (broken || renderer.disposed) {
+    disposeRenderer(renderer);
     return;
   }
   availableRenderers.push(renderer);
@@ -186,6 +204,7 @@ async function renderPreview(
   }
 
   const { photo, maxDimension } = entry;
+  renderer.sourcePhotoId = photo.id;
   const renderBlob = renderBlobForPhoto(photo);
   // Loading at roughly twice the output resolution keeps crop and mask edges
   // clean without decoding every original at full camera resolution.
@@ -197,6 +216,9 @@ async function renderPreview(
     !info
   ) {
     info = await renderer.engine.load(renderBlob, sourceLimit);
+    if (entry.cancelled || renderer.disposed) {
+      throw new Error("Developed preview removed.");
+    }
     renderer.sourceBlob = renderBlob;
     renderer.sourceLimit = sourceLimit;
     renderer.sourceInfo = {
@@ -215,6 +237,9 @@ async function renderPreview(
   renderer.engine.render(photo.edits);
   if (entry.cancelled) throw new Error("Developed preview superseded.");
   const blob = await canvasToBlob(renderer.canvas);
+  if (entry.cancelled || renderer.disposed) {
+    throw new Error("Developed preview removed.");
+  }
   return URL.createObjectURL(blob);
 }
 
@@ -276,6 +301,7 @@ function pumpQueue(): void {
     activeRenders += 1;
     entry.status = "rendering";
     const renderer = acquireRenderer();
+    activeRenderers.set(renderer, entry);
     let rendererBroken = false;
     void renderPreview(entry, renderer)
       .then((url) => {
@@ -301,6 +327,7 @@ function pumpQueue(): void {
         }
       })
       .finally(() => {
+        activeRenderers.delete(renderer);
         releaseRenderer(renderer, rendererBroken);
         activeRenders -= 1;
         pumpQueue();
@@ -339,6 +366,7 @@ function createEntry(
 function releaseEntry(entry: PreviewEntry): void {
   entry.references = Math.max(0, entry.references - 1);
   entry.lastUsed = Date.now();
+  if (entry.cancelled || previewEntries.get(entry.key) !== entry) return;
   if (entry.references > 0 || entry.releaseTimer) return;
 
   const releaseDelay =
@@ -359,6 +387,44 @@ function releaseEntry(entry: PreviewEntry): void {
   }, releaseDelay);
 }
 
+/**
+ * Releases generated pixels for permanently removed catalog photos. Deleted
+ * ids remain blocked for this session so stale view timers cannot recreate
+ * previews after the catalog records and their source URLs have been removed.
+ */
+export function deleteDevelopedPreviews(photoIds: readonly string[]): void {
+  const ids = new Set(photoIds.filter((id) => id.trim()));
+  if (!ids.size) return;
+  ids.forEach((id) => deletedPhotoIds.add(id));
+
+  const cancel = (entry: PreviewEntry) => {
+    entry.cancelled = true;
+    entry.status = "failed";
+    removeEntry(entry);
+    entry.resolve(null);
+  };
+  for (const entry of previewEntries.values()) {
+    if (ids.has(entry.photo.id)) cancel(entry);
+  }
+  for (let index = renderQueue.length - 1; index >= 0; index -= 1) {
+    if (ids.has(renderQueue[index].photo.id)) {
+      cancel(renderQueue[index]);
+      renderQueue.splice(index, 1);
+    }
+  }
+  for (const [renderer, entry] of activeRenderers) {
+    if (!ids.has(entry.photo.id)) continue;
+    cancel(entry);
+    disposeRenderer(renderer);
+  }
+  for (let index = availableRenderers.length - 1; index >= 0; index -= 1) {
+    const renderer = availableRenderers[index];
+    if (!renderer.sourcePhotoId || !ids.has(renderer.sourcePhotoId)) continue;
+    disposeRenderer(renderer);
+    availableRenderers.splice(index, 1);
+  }
+}
+
 export function acquireDevelopedPreview(
   photo: PhotoRecord,
   requestedMaxDimension: number,
@@ -371,6 +437,9 @@ export function acquireDevelopedPreview(
     editRevision(photo.edits),
     maxDimension,
   ].join(":");
+  if (deletedPhotoIds.has(photo.id)) {
+    return { key, promise: Promise.resolve(null), release: () => {} };
+  }
   let entry = previewEntries.get(key);
   if (!entry || entry.cancelled || entry.status === "failed") {
     entry = createEntry(key, photo, maxDimension);
