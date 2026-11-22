@@ -81,6 +81,21 @@ describe("default edit state", () => {
 });
 
 describe("built-in presets", () => {
+  it("keeps every former profile available as a preset", () => {
+    const profiles = BUILT_IN_PRESETS.filter((preset) => preset.profile);
+    expect(profiles.map((preset) => preset.profile).sort()).toEqual([
+      "Darkroom Color",
+      "Darkroom Landscape",
+      "Darkroom Monochrome",
+      "Darkroom Portrait",
+      "Darkroom Vivid",
+    ]);
+    expect(new Set(BUILT_IN_PRESETS.map((preset) => preset.id)).size).toBe(
+      BUILT_IN_PRESETS.length,
+    );
+    profiles.forEach((preset) => expect(preset.adjustments).toEqual({}));
+  });
+
   it("uses known adjustment keys and values within engine ranges", () => {
     for (const preset of BUILT_IN_PRESETS) {
       expect(preset.name.length).toBeGreaterThan(2);

@@ -1,7 +1,7 @@
-import { memo } from "react";
+import { memo, useLayoutEffect, useRef } from "react";
 import { Check, X } from "lucide-react";
 import { useDevelopedPreview } from "../hooks/useDevelopedPreview";
-import type { PhotoRecord } from "../types";
+import type { PhotoRecord, WorkspaceMode } from "../types";
 
 const FilmstripFrame = memo(function FilmstripFrame({
   photo,
@@ -24,7 +24,9 @@ const FilmstripFrame = memo(function FilmstripFrame({
     <button
       type="button"
       role="option"
+      aria-label={photo.name}
       aria-selected={selected}
+      aria-current={active ? "true" : undefined}
       tabIndex={active ? 0 : -1}
       className={[
         "filmstrip__frame",
@@ -94,6 +96,7 @@ export default function Filmstrip({
   onActivate,
   onOpenContextMenu,
   size = "medium",
+  mode = "library",
 }: {
   photos: PhotoRecord[];
   activeId: string | null;
@@ -101,16 +104,58 @@ export default function Filmstrip({
   onActivate: (id: string, additive: boolean, range: boolean) => void;
   onOpenContextMenu?: (id: string, x: number, y: number) => void;
   size?: "small" | "medium" | "large";
+  mode?: WorkspaceMode;
 }) {
+  const railRef = useRef<HTMLDivElement>(null);
+  const activeIndex = photos.findIndex((photo) => photo.id === activeId);
+  const activePhoto = photos[activeIndex];
+
+  useLayoutEffect(() => {
+    const rail = railRef.current;
+    const frame = rail?.querySelector<HTMLButtonElement>(".is-active");
+    if (!rail || !frame) return;
+
+    const revealActiveFrame = () => {
+      const railBounds = rail.getBoundingClientRect();
+      const frameBounds = frame.getBoundingClientRect();
+      const inset = 8;
+      const visibleLeft = railBounds.left + rail.clientLeft + inset;
+      const visibleRight = railBounds.left + rail.clientLeft + rail.clientWidth - inset;
+      if (frameBounds.left >= visibleLeft && frameBounds.right <= visibleRight) return;
+
+      // Scroll only the filmstrip, preserving the workspace and panel positions.
+      // Center distant selections so the newly opened photograph is easy to find.
+      rail.scrollTo({
+        left: rail.scrollLeft + frameBounds.left - railBounds.left - rail.clientLeft
+          - (rail.clientWidth - frameBounds.width) / 2,
+        behavior: "instant",
+      });
+    };
+
+    revealActiveFrame();
+    const observer = new ResizeObserver(revealActiveFrame);
+    observer.observe(rail);
+    observer.observe(frame);
+    return () => observer.disconnect();
+  }, [activeId, activeIndex, photos.length, size, mode]);
+
   if (!photos.length) return null;
 
   return (
-    <div className={`filmstrip filmstrip--${size}`} aria-label="Filmstrip">
+    <div className={`filmstrip filmstrip--${size} filmstrip--${mode}`} aria-label="Filmstrip">
       <div className="filmstrip__count">
-        <strong>{photos.findIndex((photo) => photo.id === activeId) + 1 || "—"}</strong>
-        <span>/ {photos.length}</span>
+        <span className="filmstrip__position">
+          <strong>{activeIndex + 1 || "—"}</strong>
+          <span> / {photos.length}{mode === "develop" ? " photos" : ""}</span>
+        </span>
+        {mode === "develop" ? (
+          <>
+            <span className="filmstrip__selection">{selectedIds.size} selected</span>
+            {activePhoto ? <span className="filmstrip__filename" title={activePhoto.name}>{activePhoto.name}</span> : null}
+          </>
+        ) : null}
       </div>
-      <div className="filmstrip__rail" role="listbox" aria-multiselectable="true">
+      <div ref={railRef} className="filmstrip__rail" role="listbox" aria-label="Photographs" aria-multiselectable="true">
         {photos.map((photo) => (
           <FilmstripFrame
             key={photo.id}

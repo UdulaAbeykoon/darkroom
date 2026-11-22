@@ -10,9 +10,7 @@ import {
   Image,
   Library,
   Plus,
-  RotateCcw,
   Search,
-  Sparkles,
   Star,
   X,
 } from "lucide-react";
@@ -210,7 +208,6 @@ function DevelopSidebar({
   onPresetAmountCommit,
   onCreateSnapshot,
   onRestoreSnapshot,
-  onReset,
   onCopySettings,
   onPasteSettings,
   canPasteSettings,
@@ -229,7 +226,6 @@ function DevelopSidebar({
   onPresetAmountCommit: () => void;
   onCreateSnapshot: () => void;
   onRestoreSnapshot: (snapshot: EditSnapshot) => void;
-  onReset: () => void;
   onCopySettings: () => void;
   onPasteSettings: () => void;
   canPasteSettings: boolean;
@@ -239,7 +235,7 @@ function DevelopSidebar({
   const presets = useMemo(
     () =>
       BUILT_IN_PRESETS.filter((preset) =>
-        `${preset.name} ${preset.group}`.toLowerCase().includes(search.toLowerCase()),
+        `${preset.name} ${preset.group} ${preset.description}`.toLowerCase().includes(search.trim().toLowerCase()),
       ),
     [search],
   );
@@ -287,8 +283,9 @@ function DevelopSidebar({
             min="0"
             max="200"
             value={presetAmount}
-            disabled={!activePreset}
+            disabled={!activePreset || Boolean(activePreset.profile)}
             aria-label="Preset amount"
+            title={activePreset?.profile ? "This preset applies a fixed color profile" : undefined}
             onInput={(event) =>
               onPresetAmountChange(Number(event.currentTarget.value))
             }
@@ -299,6 +296,9 @@ function DevelopSidebar({
           <output>{presetAmount}</output>
         </label>
       </section>
+      <div className="develop-sidebar__scroll">
+      <details className="develop-sidebar-section" open>
+        <summary><ChevronDown size={14} /><span>Presets</span><small>{BUILT_IN_PRESETS.length}</small></summary>
       <div className="preset-search">
         <Search size={14} />
         <input
@@ -308,11 +308,6 @@ function DevelopSidebar({
           onChange={(event) => setSearch(event.target.value)}
         />
       </div>
-      <div className="sidebar-section sidebar-section--grow sidebar-section--scroll">
-        <div className="sidebar-section__title">
-          <span>Presets</span>
-          <Sparkles size={12} />
-        </div>
         <div className="preset-list" aria-label="Preset groups">
           {presetGroups.map(([group, groupPresets]) => {
             const collapsed = !isFilteringPresets && collapsedPresetGroups.has(group);
@@ -368,12 +363,13 @@ function DevelopSidebar({
         {!presets.length ? (
           <p className="sidebar-muted preset-list__empty">No presets match that search.</p>
         ) : null}
-        <div className="sidebar-section__title sidebar-section__title--spaced">
-          <span>Snapshots</span>
-          <button type="button" title="Create snapshot" onClick={onCreateSnapshot}>
-            <Plus size={13} />
-          </button>
-        </div>
+      </details>
+      <details className="develop-sidebar-section">
+        <summary><ChevronDown size={14} /><span>Snapshots</span><small>{snapshots.length}</small></summary>
+        <div className="develop-sidebar-section__body">
+        <button type="button" className="sidebar-empty-action" disabled={!photo} onClick={onCreateSnapshot}>
+          <Plus size={13} /> Create snapshot
+        </button>
         {snapshots.length ? (
           <div className="snapshot-list">
             {[...snapshots].reverse().map((snapshot) => (
@@ -395,10 +391,11 @@ function DevelopSidebar({
         ) : (
           <p className="sidebar-muted">Save a named version of the current edit.</p>
         )}
-        <div className="sidebar-section__title sidebar-section__title--spaced">
-          <span>History</span>
-          <History size={12} />
         </div>
+      </details>
+      <details className="develop-sidebar-section">
+        <summary><ChevronDown size={14} /><span>History</span><History size={12} /></summary>
+        <div className="develop-sidebar-section__body">
         <div className="history-summary">
           <span className={historyCount ? "is-live" : ""} />
           <div>
@@ -410,10 +407,11 @@ function DevelopSidebar({
             <small>Non-destructive</small>
           </div>
         </div>
-        <div className="sidebar-section__title sidebar-section__title--spaced">
-          <span>Collections</span>
-          <FolderHeart size={12} />
         </div>
+      </details>
+      <details className="develop-sidebar-section">
+        <summary><ChevronDown size={14} /><span>Collections</span><FolderHeart size={12} /></summary>
+        <div className="develop-sidebar-section__body">
         {collections.length ? collections.map((collection) => (
           <NavItem
             key={collection.id}
@@ -423,13 +421,12 @@ function DevelopSidebar({
             onClick={() => onSourceChange(`collection:${collection.id}`)}
           />
         )) : <p className="sidebar-muted">No collections</p>}
+        </div>
+      </details>
       </div>
       <div className="panel-footer" aria-label="Develop clipboard actions">
         <button type="button" disabled={!photo} onClick={onCopySettings}>Copy…</button>
         <button type="button" disabled={!photo || !canPasteSettings} onClick={onPasteSettings}>Paste</button>
-        <button type="button" className="panel-footer__reset" disabled={!photo} onClick={onReset} title="Reset all edits">
-          <RotateCcw size={12} />
-        </button>
       </div>
     </>
   );
@@ -453,7 +450,6 @@ export default function LeftSidebar({
   onPresetAmountCommit,
   onCreateSnapshot,
   onRestoreSnapshot,
-  onReset,
   onCopySettings,
   onPasteSettings,
   canPasteSettings,
@@ -478,7 +474,6 @@ export default function LeftSidebar({
   onPresetAmountCommit: () => void;
   onCreateSnapshot: () => void;
   onRestoreSnapshot: (snapshot: EditSnapshot) => void;
-  onReset: () => void;
   onCopySettings: () => void;
   onPasteSettings: () => void;
   canPasteSettings: boolean;
@@ -487,7 +482,7 @@ export default function LeftSidebar({
   importActionsDisabled?: boolean;
 }) {
   return (
-    <aside className={`left-sidebar ${mode === "library" ? "left-sidebar--library" : ""}`}>
+    <aside className={`left-sidebar left-sidebar--${mode}`} aria-label={mode === "develop" ? "Navigator and presets" : "Catalog navigation"}>
       {mode === "develop" ? (
         <DevelopSidebar
           photo={photo}
@@ -503,7 +498,6 @@ export default function LeftSidebar({
           onPresetAmountCommit={onPresetAmountCommit}
           onCreateSnapshot={onCreateSnapshot}
           onRestoreSnapshot={onRestoreSnapshot}
-          onReset={onReset}
           onCopySettings={onCopySettings}
           onPasteSettings={onPasteSettings}
           canPasteSettings={canPasteSettings}

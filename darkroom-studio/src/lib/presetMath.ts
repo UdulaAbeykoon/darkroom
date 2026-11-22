@@ -1,4 +1,4 @@
-import { cloneEditState } from "../defaults";
+import { canonicalProfileName, cloneEditState } from "../defaults";
 import type {
   DevelopPreset,
   EditState,
@@ -23,6 +23,10 @@ export function applyPresetAtAmount(
   if (normalizedAmount === 0) return cloneEditState(base);
   const factor = normalizedAmount / 100;
   const next = cloneEditState(base);
+
+  // Profiles are discrete render transforms, rather than slider adjustments.
+  // Keep every existing edit intact when applying a profile-only preset.
+  if (preset.profile) next.profile = canonicalProfileName(preset.profile);
 
   for (const [key, target] of Object.entries(preset.adjustments) as [
     keyof GlobalAdjustments,

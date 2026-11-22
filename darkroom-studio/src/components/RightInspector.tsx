@@ -5,7 +5,6 @@ import {
   Blend,
   Brush,
   ChevronDown,
-  ChevronRight,
   CircleDashed,
   CircleDotDashed,
   Copy,
@@ -19,13 +18,10 @@ import {
   Plus,
   RotateCcw,
   SlidersHorizontal,
-  Sparkles,
   SunMedium,
   Trash2,
 } from "lucide-react";
 import {
-  BUILT_IN_PRESETS,
-  canonicalProfileName,
   DEFAULT_GLOBAL_ADJUSTMENTS,
   DEFAULT_LOCAL_ADJUSTMENTS,
   HUE_CHANNELS,
@@ -39,7 +35,6 @@ import type {
   ColorLabel,
   CropOverlay,
   CropState,
-  DevelopPreset,
   EditState,
   EditSnapshot,
   GeometryAdjustments,
@@ -70,7 +65,6 @@ import { AdjustmentSlider, IconButton, Panel, SegmentedControl } from "./ui";
 
 export type EditorTool =
   | "edit"
-  | "presets"
   | "crop"
   | "heal"
   | "mask"
@@ -122,8 +116,6 @@ type InspectorProps = {
   onToggleClipping: () => void;
   onProfileChange: (profile: string) => void;
   onAutoAdjust: () => void;
-  onApplyPreset: (preset: DevelopPreset) => void;
-  onPreviewPreset?: (preset: DevelopPreset | null) => void;
   onCreateSnapshot: () => void;
   onRestoreSnapshot: (snapshot: EditSnapshot) => void;
   onResetEdits: () => void;
@@ -388,20 +380,6 @@ function EditInspector(props: InspectorProps) {
         <div className="basic-mode-actions">
           <button type="button" onClick={props.onAutoAdjust}>Auto</button>
           <button type="button" onClick={() => props.onProfileChange("Darkroom Monochrome")}>B&amp;W</button>
-        </div>
-        <div className="profile-row profile-row--classic">
-          <span>Profile</span>
-          <select
-            aria-label="Profile"
-            value={canonicalProfileName(edits.profile)}
-            onChange={(event) => props.onProfileChange(event.target.value)}
-          >
-            <option value="Darkroom Color">Darkroom Color</option>
-            <option value="Darkroom Vivid">Darkroom Vivid</option>
-            <option value="Darkroom Portrait">Darkroom Portrait</option>
-            <option value="Darkroom Landscape">Darkroom Landscape</option>
-            <option value="Darkroom Monochrome">Darkroom Monochrome</option>
-          </select>
         </div>
         <div className="basic-group-label"><span>WB</span><small>As Shot</small></div>
         <div className="adjustment-list">
@@ -1897,104 +1875,6 @@ function HealInspector(props: Pick<
   );
 }
 
-function PresetsInspector({
-  photo,
-  onApplyPreset,
-  onPreviewPreset,
-}: Pick<InspectorProps, "photo" | "onApplyPreset" | "onPreviewPreset">) {
-  const [search, setSearch] = useState("");
-  const [collapsedPresetGroups, setCollapsedPresetGroups] = useState<Set<string>>(
-    () => new Set(),
-  );
-  const presets = BUILT_IN_PRESETS.filter((preset) =>
-    `${preset.name} ${preset.group} ${preset.description}`
-      .toLowerCase()
-      .includes(search.trim().toLowerCase()),
-  );
-  const presetGroups = new Map<string, DevelopPreset[]>();
-  for (const preset of presets) {
-    const group = presetGroups.get(preset.group) ?? [];
-    group.push(preset);
-    presetGroups.set(preset.group, group);
-  }
-  const isFilteringPresets = Boolean(search.trim());
-  const togglePresetGroup = (group: string) => {
-    setCollapsedPresetGroups((current) => {
-      const next = new Set(current);
-      if (next.has(group)) next.delete(group);
-      else next.add(group);
-      return next;
-    });
-  };
-  return (
-    <>
-      <div className="inspector-tool-heading">
-        <div>
-          <Sparkles size={17} />
-          <strong>Presets</strong>
-        </div>
-        <span>{presets.length}</span>
-      </div>
-      <div className="preset-search inspector-preset-search">
-        <input
-          value={search}
-          placeholder="Search presets"
-          aria-label="Search presets"
-          onChange={(event) => setSearch(event.target.value)}
-        />
-      </div>
-      <div className="preset-list inspector-preset-list" aria-label="Preset groups">
-        {[...presetGroups.entries()].map(([group, groupPresets]) => {
-          const collapsed = !isFilteringPresets && collapsedPresetGroups.has(group);
-          const groupId = `inspector-preset-group-${group.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
-          return (
-            <section className="preset-group" key={group}>
-              <button
-                type="button"
-                className="preset-group__header"
-                aria-expanded={!collapsed}
-                aria-controls={groupId}
-                onClick={() => togglePresetGroup(group)}
-              >
-                {collapsed ? <ChevronRight size={12} /> : <ChevronDown size={12} />}
-                <span>{group}</span>
-                <small>{groupPresets.length}</small>
-              </button>
-              <div id={groupId} className="preset-group__items" hidden={collapsed}>
-                {groupPresets.map((preset) => (
-                  <button
-                    key={preset.id}
-                    type="button"
-                    className="preset-row"
-                    onClick={() => {
-                      onPreviewPreset?.(null);
-                      onApplyPreset(preset);
-                    }}
-                    onPointerEnter={() => onPreviewPreset?.(preset)}
-                    onPointerLeave={() => onPreviewPreset?.(null)}
-                    onFocus={() => onPreviewPreset?.(preset)}
-                    onBlur={() => onPreviewPreset?.(null)}
-                    title={`${preset.description} Apply to ${photo.name}`}
-                  >
-                    <span className={`preset-swatch preset-swatch--${preset.id}`} />
-                    <span>
-                      <strong>{preset.name}</strong>
-                      <small>{preset.group}</small>
-                    </span>
-                  </button>
-                ))}
-              </div>
-            </section>
-          );
-        })}
-      </div>
-      {!presets.length ? (
-        <p className="sidebar-muted">No presets match that search.</p>
-      ) : null}
-    </>
-  );
-}
-
 function VersionsInspector({
   snapshots,
   historyCount,
@@ -2198,9 +2078,9 @@ function MetadataInspector({
 }
 
 export default function RightInspector(props: InspectorProps) {
+  const { metadata } = props.photo;
   const tools: { tool: EditorTool; label: string; icon: typeof Gauge }[] = [
     { tool: "edit", label: "Edit", icon: SlidersHorizontal },
-    { tool: "presets", label: "Presets", icon: Sparkles },
     { tool: "crop", label: "Crop", icon: Crop },
     { tool: "heal", label: "Remove", icon: Bandage },
     { tool: "mask", label: "Mask", icon: CircleDashed },
@@ -2209,16 +2089,25 @@ export default function RightInspector(props: InspectorProps) {
   ];
 
   return (
-    <aside className="right-inspector">
-      <button
-        type="button"
-        className={`histogram-button ${props.showClipping ? "is-active" : ""}`}
-        aria-pressed={props.showClipping}
-        onClick={props.onToggleClipping}
-        title="Toggle clipping warnings (J)"
-      >
-        <Histogram data={props.histogram} clipping={props.showClipping} />
-      </button>
+    <aside className="right-inspector" aria-label="Develop adjustments">
+      <section className="develop-histogram" aria-label="Histogram">
+        <header><strong>Histogram</strong></header>
+        <button
+          type="button"
+          className={`histogram-button ${props.showClipping ? "is-active" : ""}`}
+          aria-pressed={props.showClipping}
+          onClick={props.onToggleClipping}
+          title="Toggle clipping warnings (J)"
+        >
+          <Histogram data={props.histogram} clipping={props.showClipping} />
+        </button>
+        <div className="develop-histogram__metadata" aria-label="Camera settings">
+          {metadata.iso ? <span>ISO {metadata.iso}</span> : null}
+          {metadata.focalLength ? <span>{metadata.focalLength} mm</span> : null}
+          {metadata.aperture ? <span>f/{metadata.aperture}</span> : null}
+          {metadata.shutter ? <span>{metadata.shutter}</span> : null}
+        </div>
+      </section>
       <div className="editor-tools">
         {tools.map(({ tool, label, icon }) => (
           <IconButton
@@ -2232,13 +2121,6 @@ export default function RightInspector(props: InspectorProps) {
       </div>
       <div className="right-inspector__scroll">
         {props.tool === "edit" ? <EditInspector {...props} /> : null}
-        {props.tool === "presets" ? (
-          <PresetsInspector
-            photo={props.photo}
-            onApplyPreset={props.onApplyPreset}
-            onPreviewPreset={props.onPreviewPreset}
-          />
-        ) : null}
         {props.tool === "crop" ? <CropInspector {...props} /> : null}
         {props.tool === "mask" ? <MaskInspector {...props} /> : null}
         {props.tool === "heal" ? <HealInspector {...props} /> : null}
