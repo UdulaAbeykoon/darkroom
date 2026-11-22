@@ -53,13 +53,8 @@ const completed = (message) => {
   console.log(`PASS: ${message}`);
   writeFileSync(join(outputDir, "progress.json"), JSON.stringify({ url, checks, metrics, browserErrors }, null, 2));
 };
-const artifactRoutes = new Map();
-await page.route("**/__quality-artifact/*", async (route) => {
-  const key = new URL(route.request().url()).pathname.split("/").pop();
-  const artifact = artifactRoutes.get(key);
-  assert.ok(artifact, `Unknown test artifact ${key}`);
-  await route.fulfill({ path: artifact.path, contentType: artifact.mime });
-});
+let inspectionContext;
+let inspectionPage;
 let downloadIndex = 0;
 
 async function storedPhoto(name) {
@@ -148,9 +143,7 @@ async function takeDownload(action, label) {
         : "application/octet-stream";
   const artifact = { path, suggestedFilename, bytes: buffer.length, sha256: sha256(buffer), mime,
     downloadMs: Math.round(performance.now() - start) };
-  const key = String(downloadIndex);
-  artifactRoutes.set(key, artifact);
-  return { ...artifact, key };
+  return artifact;
 }
 
 async function downloadOriginal(name, via = "export") {
@@ -198,8 +191,18 @@ async function exportImage(format, fileName, sizing = null) {
 }
 
 async function inspectImage(artifact) {
-  const decoded = await page.evaluate(async ({ key }) => {
-    const blob = await (await fetch(new URL(`__quality-artifact/${key}`, location.href))).blob();
+  if (!inspectionPage) {
+    inspectionContext = await browser.newContext();
+    inspectionPage = await inspectionContext.newPage();
+    await inspectionPage.setContent('<input type="file" aria-label="Inspect downloaded image">');
+  }
+  // Large D850 PNGs can exceed 90 MB. A native file input avoids encoding the
+  // entire download into a base64 CDP response and keeps inspection outside
+  // the app renderer/catalog. Only the small sampled pixels cross the protocol.
+  await inspectionPage.getByLabel("Inspect downloaded image").setInputFiles(artifact.path);
+  const decoded = await inspectionPage.evaluate(async () => {
+    const input = document.querySelector("input");
+    const blob = input.files[0];
     const bitmap = await createImageBitmap(blob);
     const width = bitmap.width, height = bitmap.height;
     const canvas = document.createElement("canvas");
@@ -208,6 +211,8 @@ async function inspectImage(artifact) {
     ctx.drawImage(bitmap, 0, 0, 128, 128);
     bitmap.close();
     const rgba = ctx.getImageData(0, 0, 128, 128).data;
+    canvas.width = 1; canvas.height = 1;
+    input.value = "";
     const rgb = [];
     let sum = 0, sumSquares = 0, minimum = 255, maximum = 0, opaque = 0;
     for (let index = 0; index < rgba.length; index += 4) {
@@ -221,7 +226,7 @@ async function inspectImage(artifact) {
     return { width, height, sampleSize: [128, 128], meanLuminance: sum / count,
       luminanceStdDev: Math.sqrt(Math.max(0, sumSquares / count - (sum / count) ** 2)),
       minimumLuminance: minimum, maximumLuminance: maximum, opaqueFraction: opaque / count, rgb };
-  }, { key: artifact.key });
+  });
   assert.ok(decoded.width > 0 && decoded.height > 0);
   assert.ok(decoded.luminanceStdDev > 0, `${artifact.suggestedFilename}: image contains visible variation`);
   assert.ok(decoded.maximumLuminance > decoded.minimumLuminance);
@@ -242,7 +247,7 @@ function imageDifference(a, b) {
 }
 
 function reportImage(image) {
-  const { rgb, key, ...report } = image;
+  const { rgb, ...report } = image;
   return report;
 }
 
@@ -476,6 +481,7 @@ try {
   console.error(JSON.stringify({ completedChecks: checks, browserErrors, error: String(error), outputDir }, null, 2));
   throw error;
 } finally {
+  await inspectionContext?.close().catch(() => {});
   await context.close().catch(() => {});
   await browser.close().catch(() => {});
 }
