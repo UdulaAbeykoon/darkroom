@@ -114,8 +114,6 @@ type InspectorProps = {
   onToolChange: (tool: EditorTool) => void;
   onCropOverlayChange: (overlay: CropOverlay) => void;
   onToggleClipping: () => void;
-  onProfileChange: (profile: string) => void;
-  onAutoAdjust: () => void;
   onCreateSnapshot: () => void;
   onRestoreSnapshot: (snapshot: EditSnapshot) => void;
   onResetEdits: () => void;
@@ -377,10 +375,6 @@ function EditInspector(props: InspectorProps) {
           </button>
         }
       >
-        <div className="basic-mode-actions">
-          <button type="button" onClick={props.onAutoAdjust}>Auto</button>
-          <button type="button" onClick={() => props.onProfileChange("Darkroom Monochrome")}>B&amp;W</button>
-        </div>
         <div className="basic-group-label"><span>WB</span><small>As Shot</small></div>
         <div className="adjustment-list">
           {basicControls.slice(0, 2).map((control) => (

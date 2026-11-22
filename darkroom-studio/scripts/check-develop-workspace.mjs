@@ -171,6 +171,15 @@ try {
     Array.from(select.options).some((option) => option.text === "Darkroom Landscape")).length), 0);
   checks.push("All five color profiles are left-side presets, with no right-side presets or profile selector");
 
+  const basic = right.locator(".inspector-panel").filter({ has: page.getByText("Basic", { exact: true }) });
+  assert.equal(await basic.count(), 1);
+  assert.equal(await basic.getByRole("button", { name: "Auto", exact: true }).count(), 0);
+  assert.equal(await basic.getByRole("button", { name: "B&W", exact: true }).count(), 0);
+  for (const name of ["Temperature", "Exposure", "Contrast"]) {
+    assert.equal(await basic.getByRole("slider", { name, exact: true }).isVisible(), true);
+  }
+  checks.push("Basic keeps its adjustment sliders without the removed Auto and B&W shortcuts");
+
   await right.getByRole("button", { name: "Set Exposure value", exact: true }).click();
   await right.getByRole("spinbutton", { name: "Exposure value", exact: true }).fill("1.25");
   await right.getByRole("spinbutton", { name: "Exposure value", exact: true }).press("Enter");
@@ -187,13 +196,13 @@ try {
   assert.equal(await left.getByRole("button", { name: /^Darkroom Landscape\b/ }).getAttribute("aria-pressed"), "true");
   checks.push("Applying a profile preserves manual exposure and supports Undo/Redo");
 
-  await right.getByRole("button", { name: "B&W", exact: true }).click();
+  await left.getByRole("button", { name: /^Darkroom Monochrome\b/ }).click();
   await expectSaved("photo-039.png", { profile: "Darkroom Monochrome", exposure: 1.25 });
   assert.equal(await left.getByRole("button", { name: /^Darkroom Monochrome\b/ }).getAttribute("aria-pressed"), "true");
   await page.getByRole("button", { name: "Undo", exact: true }).click();
   await expectSaved("photo-039.png", { profile: "Darkroom Landscape", exposure: 1.25 });
   assert.equal(await left.getByRole("button", { name: /^Darkroom Landscape\b/ }).getAttribute("aria-pressed"), "true");
-  checks.push("Basic B&W and Undo keep the left preset selection synchronized");
+  checks.push("The left Monochrome preset and Undo keep the preset selection synchronized");
 
   await page.reload({ waitUntil: "networkidle" });
   await page.locator(".blocking-status").waitFor({ state: "hidden" });

@@ -572,7 +572,7 @@ export default function App() {
     };
   }, [activePhoto, previewPreset]);
 
-  // Profile presets reflect saved edits, including undo, reload, and B&W.
+  // Profile presets reflect saved edits, including undo and reload.
   // Hover previews must not change which preset is marked as applied.
   const appliedPreset = BUILT_IN_PRESETS.find((preset) => preset.id === activePresetId);
   const displayedPresetId = appliedPreset && !appliedPreset.profile
@@ -1624,54 +1624,6 @@ export default function App() {
       if (pending) setHistogram(pending);
     }, 50);
   }, []);
-
-  const updateProfile = useCallback(
-    (profile: string) => {
-      beginEdit();
-      updateEditState((edits) => ({ ...edits, profile }));
-      presetBaseRef.current = null;
-      setActivePresetId(null);
-      setPresetAmount(100);
-      commitEdit();
-    },
-    [beginEdit, commitEdit, updateEditState],
-  );
-
-  const autoAdjust = useCallback(() => {
-    if (!histogram) return;
-    const total = histogram.luminance.reduce((sum, value) => sum + value, 0);
-    if (total <= 0) return;
-    const mean =
-      histogram.luminance.reduce(
-        (sum, value, index) => sum + value * (index / 255),
-        0,
-      ) / total;
-    const shadows = histogram.luminance
-      .slice(0, 64)
-      .reduce((sum, value) => sum + value, 0) / total;
-    const highlights = histogram.luminance
-      .slice(210)
-      .reduce((sum, value) => sum + value, 0) / total;
-    beginEdit();
-    updateEditState((edits) => ({
-      ...edits,
-      global: {
-        ...edits.global,
-        exposure: Math.max(
-          -2,
-          Math.min(2, Math.log2(0.46 / Math.max(0.03, mean))),
-        ),
-        contrast: Math.round((0.5 - Math.abs(mean - 0.5)) * 14),
-        highlights: Math.round(-Math.min(45, highlights * 120)),
-        shadows: Math.round(Math.min(45, shadows * 115)),
-        whites: highlights < 0.06 ? 8 : 0,
-        blacks: shadows < 0.08 ? -6 : 0,
-        vibrance: 10,
-      },
-    }));
-    commitEdit();
-    notify("Auto tone applied.");
-  }, [beginEdit, commitEdit, histogram, notify, updateEditState]);
 
   const updateGeometry = useCallback(
     <K extends keyof GeometryAdjustments>(
@@ -3077,8 +3029,6 @@ export default function App() {
             onToolChange={changeTool}
             onCropOverlayChange={setCropOverlay}
             onToggleClipping={() => setShowClipping((visible) => !visible)}
-            onProfileChange={updateProfile}
-            onAutoAdjust={autoAdjust}
             onCreateSnapshot={createSnapshot}
             onRestoreSnapshot={restoreSnapshot}
             onResetEdits={resetEdits}
