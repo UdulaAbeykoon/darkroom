@@ -92,7 +92,7 @@ import "./import-management.css";
 import { ImageEngine } from "./lib/imageEngine";
 import { solveGuidedUpright } from "./lib/guidedUpright";
 import { applyPresetAtAmount } from "./lib/presetMath";
-import { CAMERA_RAW_ACCEPT, renderBlobForPhoto } from "./lib/rawImage";
+import { CAMERA_RAW_ACCEPT, cameraRawInfo, fullRenderForPhoto, fullRenderBlobForPhoto, renderBlobForPhoto } from "./lib/rawImage";
 import { mergeSynchronizedSettings } from "./lib/syncSettings";
 import { CROP_OVERLAY_SEQUENCE } from "./types";
 import {
@@ -145,8 +145,8 @@ type FilmstripSize = "small" | "medium" | "large";
 type FilmstripMenuState = { photoId: string; x: number; y: number };
 
 const DEFAULT_EXPORT: ExportSettings = {
-  format: "image/jpeg",
-  quality: 0.9,
+  format: "image/png",
+  quality: 1,
   resizeMode: "original",
   longEdge: 2400,
   width: 2400,
@@ -277,6 +277,7 @@ export default function App() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const selectionRef = useRef({ activeId, selectedIds });
   selectionRef.current = { activeId, selectedIds };
+  const failedRawUpgradesRef = useRef(new WeakSet<Blob>());
   const [tool, setTool] = useState<EditorTool>("edit");
   const [cropOverlay, setCropOverlay] = useState<CropOverlay>("thirds");
   const [healSettings, setHealSettings] = useState<HealToolSettings>({
@@ -594,10 +595,17 @@ export default function App() {
     setExportSettings((settings) => ({
       ...settings,
       fileName: `${withoutExtension(activePhoto.name)}_edit`,
+    }));
+  }, [activePhoto?.id]);
+
+  useEffect(() => {
+    if (!activePhoto) return;
+    setExportSettings((settings) => ({
+      ...settings,
       width: activePhoto.width,
       height: activePhoto.height,
     }));
-  }, [activePhoto?.id]);
+  }, [activePhoto?.id, activePhoto?.width, activePhoto?.height]);
 
   const importGroups = useMemo(() => getImportGroups(photos), [photos]);
   const deferredSearch = useDeferredValue(search);
@@ -722,6 +730,31 @@ export default function App() {
     },
     [cancelPendingPhotoFrame, notify, schedulePhotoRender],
   );
+
+  useEffect(() => {
+    if (mode !== "develop" || !activePhoto || !cameraRawInfo(activePhoto)) return;
+    if (activePhoto.renderKind || failedRawUpgradesRef.current.has(activePhoto.blob)) return;
+    let cancelled = false;
+    const photo = activePhoto;
+    void fullRenderForPhoto(photo, true).then((render) => {
+      if (cancelled) return;
+      updatePhoto(photo.id, (current) => ({
+        ...current,
+        width: render.width,
+        height: render.height,
+        renderBlob: render.blob,
+        renderKind: render.renderKind,
+      }), true);
+      if (render.renderKind === "camera-jpeg") {
+        notify("This RAW compression is not supported for full-quality editing. Its camera preview is shown; Original export preserves the RAW file.");
+      }
+    }).catch((error) => {
+      if (cancelled) return;
+      failedRawUpgradesRef.current.add(photo.blob);
+      notify(error instanceof Error ? error.message : "Could not prepare the full-resolution RAW image.", "error");
+    });
+    return () => { cancelled = true; };
+  }, [mode, activeId, activePhoto?.blob, activePhoto?.renderKind, updatePhoto, notify]);
 
   const updatePhotos = useCallback(
     (
@@ -2098,7 +2131,8 @@ export default function App() {
     let exported = 0;
     const failures: string[] = [];
     try {
-      controller = new ImageEngine(document.createElement("canvas"));
+      const original = exportSettings.format === "original";
+      if (!original) controller = new ImageEngine(document.createElement("canvas"));
       const extension =
         exportSettings.format === "image/png"
           ? "png"
@@ -2114,10 +2148,8 @@ export default function App() {
           name: photo.name,
         });
         try {
-          const blob = await controller.export(
-            renderBlobForPhoto(photo),
-            photo.edits,
-            exportSettings,
+          const blob = original ? photo.blob : await controller!.export(
+            await fullRenderBlobForPhoto(photo), photo.edits, exportSettings,
           );
           if (exportCanceledRef.current) break;
           const url = URL.createObjectURL(blob);
@@ -2127,7 +2159,7 @@ export default function App() {
               ? exportSettings.fileName || `${withoutExtension(photo.name)}_edit`
               : `${exportSettings.fileName || "Darkroom_export"}_${String(index + 1).padStart(3, "0")}_${withoutExtension(photo.name)}`;
           anchor.href = url;
-          anchor.download = `${fileName}.${extension}`;
+          anchor.download = original ? photo.name : `${fileName}.${extension}`;
           anchor.click();
           window.setTimeout(() => URL.revokeObjectURL(url), 30_000);
           exported += 1;
@@ -2139,7 +2171,7 @@ export default function App() {
           );
         }
       }
-      setShowExport(false);
+      setShowExport(failures.length > 0 && exported === 0 && !exportCanceledRef.current);
       if (exportCanceledRef.current) {
         notify(
           exported
@@ -2149,7 +2181,7 @@ export default function App() {
         );
       } else if (exported) {
         notify(
-          `${exported} ${exported === 1 ? "photo" : "photos"} rendered; browser downloads were requested.`,
+          `${exported} ${original ? "original" : "photo"}${exported === 1 ? "" : "s"} exported; browser downloads were requested.`,
           failures.length ? "info" : "success",
         );
       }

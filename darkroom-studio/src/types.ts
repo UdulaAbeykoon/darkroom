@@ -369,6 +369,8 @@ export interface PhotoRecord {
   importMethod?: ImportMethod;
   /** Browser-decodable working image when `blob` is a camera RAW original. */
   renderBlob?: Blob;
+  /** Distinguishes a full-resolution RAW decode from a camera JPEG fallback. */
+  renderKind?: "full-resolution" | "camera-jpeg";
   blob: Blob;
   objectUrl: string;
   thumbnailUrl: string;
@@ -406,7 +408,7 @@ export interface DevelopPreset {
 }
 
 export interface ExportSettings {
-  format: "image/jpeg" | "image/png" | "image/webp";
+  format: "image/jpeg" | "image/png" | "image/webp" | "original";
   quality: number;
   resizeMode: "original" | "long-edge" | "dimensions";
   longEdge: number;

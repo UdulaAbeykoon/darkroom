@@ -30,6 +30,36 @@ const BRUSH_ATLAS_ROWS = 2;
 const MAX_MASK_COMPONENTS = 32;
 const DEFAULT_PREVIEW_DIMENSION = 4096;
 const HISTOGRAM_SAMPLE_BUDGET = 300_000;
+const MAX_EXPORT_PIXELS = 64_000_000;
+
+/** Reject an unsupported requested size instead of silently exporting fewer pixels. */
+export function validateExportDimensions(
+  width: number,
+  height: number,
+  maximumDimension: number,
+): void {
+  if (!Number.isSafeInteger(width) || !Number.isSafeInteger(height) || width < 1 || height < 1) {
+    throw new Error("The requested export dimensions are invalid.");
+  }
+  if (width > maximumDimension || height > maximumDimension || width * height > MAX_EXPORT_PIXELS) {
+    throw new Error(
+      `The requested ${width} × ${height} export exceeds this browser's rendering limit (${maximumDimension} pixels per side, ${MAX_EXPORT_PIXELS / 1_000_000} megapixels). Choose a smaller output size or export the unchanged original. No reduced-resolution file was created.`,
+    );
+  }
+}
+
+/** WebGL readback starts at the bottom; ImageData starts at the top. */
+export function flipRgbaRows(pixels: Uint8ClampedArray, width: number, height: number): void {
+  const rowLength = width * 4;
+  const row = new Uint8ClampedArray(rowLength);
+  for (let top = 0, bottom = height - 1; top < bottom; top += 1, bottom -= 1) {
+    const topOffset = top * rowLength;
+    const bottomOffset = bottom * rowLength;
+    row.set(pixels.subarray(topOffset, topOffset + rowLength));
+    pixels.copyWithin(topOffset, bottomOffset, bottomOffset + rowLength);
+    pixels.set(row, bottomOffset);
+  }
+}
 
 // The fragment shader is intentionally feature-rich, but most edits leave
 // several entire adjustment families at their neutral values. A compact flag
@@ -1813,6 +1843,7 @@ export class ImageEngine {
   private cssWidth: number;
   private cssHeight: number;
   private dpr: number;
+  private exportTargetSize: { width: number; height: number } | null = null;
   private lastState: EditState | null = null;
   private lastOptions: RenderOptions = {};
   private lastGeometry: FrameGeometry | null = null;
@@ -1954,6 +1985,12 @@ export class ImageEngine {
         DEFAULT_PREVIEW_DIMENSION,
       );
     }
+    if (maxPreviewDimension === Number.POSITIVE_INFINITY && Math.max(sourceWidth, sourceHeight) > rendererLimit) {
+      this.closeImage(decoded);
+      throw new Error(
+        `This ${sourceWidth} × ${sourceHeight} image exceeds the GPU texture limit (${rendererLimit} pixels per side). Full-quality rendering is unavailable in this browser. Export the unchanged original to preserve its quality.`,
+      );
+    }
     const requestedLimit =
       maxPreviewDimension === Number.POSITIVE_INFINITY
         ? rendererLimit
@@ -2008,11 +2045,41 @@ export class ImageEngine {
     this.cssHeight = Math.max(1, finite(height, 1));
     const browserDpr =
       typeof window === "undefined" ? 1 : finite(window.devicePixelRatio, 1);
-    this.dpr = clamp(dpr ?? browserDpr, 0.25, 4);
-    const pixelWidth = Math.max(1, Math.round(this.cssWidth * this.dpr));
-    const pixelHeight = Math.max(1, Math.round(this.cssHeight * this.dpr));
+    const requestedDpr = Math.max(0.25, finite(dpr ?? browserDpr, 1));
+    const viewport = this.gl?.getParameter(this.gl.MAX_VIEWPORT_DIMS) as Int32Array | undefined;
+    const renderbufferLimit = Math.max(1, finite(
+      this.gl?.getParameter(this.gl.MAX_RENDERBUFFER_SIZE) as number,
+      16_384,
+    ));
+    const maximumWidth = Math.max(1, Math.min(renderbufferLimit, finite(viewport?.[0], 16_384)));
+    const maximumHeight = Math.max(1, Math.min(renderbufferLimit, finite(viewport?.[1], 16_384)));
+    // A zoomed canvas needs more backing pixels while retaining its CSS bounds
+    // for pointer/mask mapping. Bound allocations by the renderer and memory,
+    // rather than an arbitrary DPR ceiling that blurs Retina zoom previews.
+    this.dpr = Math.min(
+      requestedDpr,
+      maximumWidth / this.cssWidth,
+      maximumHeight / this.cssHeight,
+      Math.sqrt(MAX_EXPORT_PIXELS / (this.cssWidth * this.cssHeight)),
+    );
+    const pixelWidth = Math.max(1, Math.floor(this.cssWidth * this.dpr));
+    const pixelHeight = Math.max(1, Math.floor(this.cssHeight * this.dpr));
     if (this.canvas.width !== pixelWidth) this.canvas.width = pixelWidth;
     if (this.canvas.height !== pixelHeight) this.canvas.height = pixelHeight;
+    // Chromium may cap its default framebuffer area below the advertised GPU
+    // dimensions. Keep the canvas and pointer geometry aligned with the pixels
+    // it actually allocated instead of drawing a clipped, oversized viewport.
+    if (this.gl) {
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        const actualWidth = this.gl.drawingBufferWidth;
+        const actualHeight = this.gl.drawingBufferHeight;
+        if (!(actualWidth > 0 && actualHeight > 0) ||
+            (actualWidth === this.canvas.width && actualHeight === this.canvas.height)) break;
+        this.canvas.width = actualWidth;
+        this.canvas.height = actualHeight;
+      }
+      this.dpr = Math.min(this.canvas.width / this.cssWidth, this.canvas.height / this.cssHeight);
+    }
     this.canvas.style.width = `${this.cssWidth}px`;
     this.canvas.style.height = `${this.cssHeight}px`;
     this.histogramDirty = true;
@@ -2465,6 +2532,7 @@ export class ImageEngine {
     settings: ExportSettings,
   ): Promise<Blob> {
     this.assertAlive();
+    if (settings.format === "original") return blob;
     if (typeof document === "undefined") {
       throw new Error("Image export requires a browser document.");
     }
@@ -2507,11 +2575,6 @@ export class ImageEngine {
         outputHeight *= scale;
       }
 
-      const previewScale = Math.min(
-        1,
-        exportEngine.previewWidth / info.sourceWidth,
-        exportEngine.previewHeight / info.sourceHeight,
-      );
       const viewportDimensions = exportEngine.gl
         ? (exportEngine.gl.getParameter(
             exportEngine.gl.MAX_VIEWPORT_DIMS,
@@ -2520,33 +2583,28 @@ export class ImageEngine {
       const maximumDimension = Math.max(
         1,
         viewportDimensions
-          ? Math.min(viewportDimensions[0], viewportDimensions[1])
+          ? Math.min(
+              viewportDimensions[0], viewportDimensions[1],
+              exportEngine.gl!.getParameter(exportEngine.gl!.MAX_TEXTURE_SIZE) as number,
+            )
           : 16_384,
       );
-      const maximumPixelCount = 64_000_000;
-      const pixelBudgetScale = Math.sqrt(
-        maximumPixelCount / Math.max(1, outputWidth * outputHeight),
-      );
-      const safeScale = Math.min(
-        1,
-        maximumDimension / Math.max(outputWidth, outputHeight),
-        pixelBudgetScale,
-        settings.resizeMode === "original" && previewScale < 1
-          ? previewScale
-          : 1,
-      );
-      outputWidth = Math.max(1, Math.round(outputWidth * safeScale));
-      outputHeight = Math.max(1, Math.round(outputHeight * safeScale));
-
-      exportEngine.resize(outputWidth, outputHeight, 1);
-      exportEngine.render(editState);
+      outputWidth = Math.max(1, Math.round(outputWidth));
+      outputHeight = Math.max(1, Math.round(outputHeight));
+      validateExportDimensions(outputWidth, outputHeight, maximumDimension);
 
       const outputCanvas = document.createElement("canvas");
       outputCanvas.width = outputWidth;
       outputCanvas.height = outputHeight;
       const context = outputCanvas.getContext("2d");
       if (!context) throw new Error("Unable to create the export canvas.");
-      context.drawImage(renderCanvas, 0, 0, outputWidth, outputHeight);
+      if (exportEngine.gl) {
+        exportEngine.renderExportWebGl(editState, outputWidth, outputHeight, context);
+      } else {
+        exportEngine.resize(outputWidth, outputHeight, 1);
+        exportEngine.render(editState);
+        context.drawImage(renderCanvas, 0, 0, outputWidth, outputHeight);
+      }
       if (settings.watermarkEnabled && settings.watermarkText.trim()) {
         this.drawWatermark(context, outputWidth, outputHeight, settings);
       }
@@ -2557,6 +2615,51 @@ export class ImageEngine {
       return await this.canvasToBlob(outputCanvas, settings.format, quality);
     } finally {
       exportEngine.destroy();
+    }
+  }
+
+  private renderExportWebGl(
+    state: EditState,
+    width: number,
+    height: number,
+    context: CanvasRenderingContext2D,
+  ): void {
+    const gl = this.gl!;
+    const texture = gl.createTexture();
+    const framebuffer = gl.createFramebuffer();
+    const previousFramebuffer = gl.getParameter(gl.FRAMEBUFFER_BINDING) as WebGLFramebuffer | null;
+    try {
+      if (!texture || !framebuffer || gl.isContextLost()) {
+        throw new Error("Unable to allocate the full-resolution export framebuffer.");
+      }
+      // A texture framebuffer retains all requested pixels even when the browser
+      // caps the area of a canvas's default framebuffer (e.g. Chromium at ~32 MP).
+      gl.bindTexture(gl.TEXTURE_2D, texture);
+      this.configureTexture(gl);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, width, height, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+      gl.bindTexture(gl.TEXTURE_2D, null);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture, 0);
+      if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) {
+        throw new Error("The browser could not allocate the requested full-resolution export. Choose a smaller output size or export the unchanged original. No reduced-resolution file was created.");
+      }
+      this.cssWidth = width;
+      this.cssHeight = height;
+      this.dpr = 1;
+      this.exportTargetSize = { width, height };
+      this.render(state);
+      const pixels = new Uint8ClampedArray(width * height * 4);
+      gl.readPixels(0, 0, width, height, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array(pixels.buffer));
+      if (gl.isContextLost() || gl.getError() !== gl.NO_ERROR) {
+        throw new Error("The browser could not render the full-resolution export. Choose a smaller output size or export the unchanged original. No reduced-resolution file was created.");
+      }
+      flipRgbaRows(pixels, width, height);
+      context.putImageData(new ImageData(pixels, width, height), 0, 0);
+    } finally {
+      this.exportTargetSize = null;
+      gl.bindFramebuffer(gl.FRAMEBUFFER, previousFramebuffer);
+      if (framebuffer) gl.deleteFramebuffer(framebuffer);
+      if (texture) gl.deleteTexture(texture);
     }
   }
 
@@ -2748,7 +2851,11 @@ export class ImageEngine {
       state.masks.filter((mask) => mask.enabled).slice(0, MAX_MASKS),
     );
 
-    gl.viewport(0, 0, this.canvas.width, this.canvas.height);
+    gl.viewport(
+      0, 0,
+      this.exportTargetSize?.width ?? gl.drawingBufferWidth,
+      this.exportTargetSize?.height ?? gl.drawingBufferHeight,
+    );
     gl.clearColor(0, 0, 0, 0);
     gl.clear(gl.COLOR_BUFFER_BIT);
     gl.disable(gl.DEPTH_TEST);

@@ -145,6 +145,7 @@ interface DecodedImage {
   height: number;
   thumbnailBlob: Blob;
   renderBlob?: Blob;
+  renderKind?: PhotoRecord["renderKind"];
   metadata?: PhotoMetadata;
 }
 
@@ -1256,6 +1257,7 @@ async function decodeImage(
     return {
       ...decoded,
       renderBlob: raw.blob,
+      renderKind: raw.renderKind,
       metadata: raw.metadata,
     };
   }
@@ -1493,6 +1495,7 @@ export async function importFiles(
         importMethod: options.method,
         blob: catalogBlob,
         renderBlob: decoded.renderBlob,
+        renderKind: decoded.renderKind,
         thumbnailBlob: decoded.thumbnailBlob,
         lastModified: file.lastModified,
         fingerprint,
@@ -1583,6 +1586,7 @@ async function storedPhotoFromPublic(
     blob: photo.blob,
     renderBlob:
       photo.renderBlob instanceof Blob ? photo.renderBlob : existing?.renderBlob,
+    renderKind: photo.renderKind ?? existing?.renderKind,
     thumbnailBlob,
     lastModified,
     fingerprint:
