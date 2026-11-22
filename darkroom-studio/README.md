@@ -126,6 +126,19 @@ npm test
 npm run build
 ```
 
+The Develop browser regression check imports 40 generated photographs into an
+isolated catalog, exercises filmstrip selection and scrolling, applies the
+left-side profile presets, and checks undo, redo, persistence, and panel layout:
+
+```bash
+# Start Vite, or pass the URL of a served production build.
+PLAYWRIGHT_MODULE=/absolute/path/to/playwright/index.mjs \
+  node scripts/check-develop-workspace.mjs http://127.0.0.1:4174
+```
+
+Playwright is optional test tooling. Set `E2E_SCREENSHOT` to choose where the
+final browser screenshot is saved.
+
 ## Manual masking workflow
 
 Choose **Mask → Add New Mask → Brush, Linear Gradient, or Radial Gradient**.

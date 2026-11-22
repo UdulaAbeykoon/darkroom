@@ -308,6 +308,46 @@ export const BUILT_IN_PRESETS: DevelopPreset[] = [
       grain: 14,
     },
   },
+  {
+    id: "darkroom-color",
+    name: "Darkroom Color",
+    group: "Darkroom",
+    description: "Natural color rendering. Keeps your current adjustments.",
+    profile: "Darkroom Color",
+    adjustments: {},
+  },
+  {
+    id: "darkroom-vivid",
+    name: "Darkroom Vivid",
+    group: "Darkroom",
+    description: "Rich, vivid color rendering. Keeps your current adjustments.",
+    profile: "Darkroom Vivid",
+    adjustments: {},
+  },
+  {
+    id: "darkroom-portrait",
+    name: "Darkroom Portrait",
+    group: "Darkroom",
+    description: "Gentle portrait color rendering. Keeps your current adjustments.",
+    profile: "Darkroom Portrait",
+    adjustments: {},
+  },
+  {
+    id: "darkroom-landscape",
+    name: "Darkroom Landscape",
+    group: "Darkroom",
+    description: "Expressive landscape color rendering. Keeps your current adjustments.",
+    profile: "Darkroom Landscape",
+    adjustments: {},
+  },
+  {
+    id: "darkroom-monochrome",
+    name: "Darkroom Monochrome",
+    group: "Darkroom",
+    description: "Black-and-white rendering. Keeps your current adjustments.",
+    profile: "Darkroom Monochrome",
+    adjustments: {},
+  },
 ];
 
 export const cloneEditState = (state: EditState): EditState =>

@@ -64,6 +64,7 @@ import {
   BUILT_IN_PRESETS,
   DEFAULT_GLOBAL_ADJUSTMENTS,
   DEFAULT_LOCAL_ADJUSTMENTS,
+  canonicalProfileName,
   cloneEditState,
   createDefaultEditState,
 } from "./defaults";
@@ -274,6 +275,8 @@ export default function App() {
   const [search, setSearch] = useState("");
   const [activeId, setActiveId] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const selectionRef = useRef({ activeId, selectedIds });
+  selectionRef.current = { activeId, selectedIds };
   const [tool, setTool] = useState<EditorTool>("edit");
   const [cropOverlay, setCropOverlay] = useState<CropOverlay>("thirds");
   const [healSettings, setHealSettings] = useState<HealToolSettings>({
@@ -569,6 +572,15 @@ export default function App() {
     };
   }, [activePhoto, previewPreset]);
 
+  // Profile presets reflect saved edits, including undo, reload, and B&W.
+  // Hover previews must not change which preset is marked as applied.
+  const appliedPreset = BUILT_IN_PRESETS.find((preset) => preset.id === activePresetId);
+  const displayedPresetId = appliedPreset && !appliedPreset.profile
+    ? appliedPreset.id
+    : BUILT_IN_PRESETS.find((preset) =>
+      activePhoto && preset.profile === canonicalProfileName(activePhoto.edits.profile),
+    )?.id ?? null;
+
   const exportTargets = useMemo(() => {
     const selected = [...selectedIds].flatMap((id) => {
       const photo = photoByIdRef.current.get(id);
@@ -654,6 +666,13 @@ export default function App() {
       return next.size === current.size ? current : next;
     });
   }, [filteredPhotoIds]);
+
+  // Every entry into Develop (including module/keyboard shortcuts and filter
+  // fallbacks) must keep the photograph on the canvas in the selection.
+  useEffect(() => {
+    if (mode !== "develop" || !activeId) return;
+    setSelectedIds((current) => current.has(activeId) ? current : new Set([...current, activeId]));
+  }, [mode, activeId]);
 
   const selectAllVisible = useCallback(() => {
     setSelectedIds(new Set(filteredPhotosRef.current.map((photo) => photo.id)));
@@ -886,7 +905,14 @@ export default function App() {
 
   const selectPhoto = useCallback(
     (id: string, additive: boolean, range: boolean) => {
-      setActiveId(id);
+      const { activeId: currentActiveId, selectedIds: currentSelection } = selectionRef.current;
+      // Deselecting a frame moves the canvas to a remaining selected photo.
+      const nextActiveId = additive && !range && currentSelection.has(id) && currentSelection.size > 1
+        ? currentActiveId && currentActiveId !== id && currentSelection.has(currentActiveId)
+          ? currentActiveId
+          : [...currentSelection].find((selectedId) => selectedId !== id)!
+        : id;
+      setActiveId(nextActiveId);
       setSelectedIds((current) => {
         if (range && lastSelectedRef.current) {
           const filtered = filteredPhotosRef.current;
@@ -1603,6 +1629,9 @@ export default function App() {
     (profile: string) => {
       beginEdit();
       updateEditState((edits) => ({ ...edits, profile }));
+      presetBaseRef.current = null;
+      setActivePresetId(null);
+      setPresetAmount(100);
       commitEdit();
     },
     [beginEdit, commitEdit, updateEditState],
@@ -2682,7 +2711,7 @@ export default function App() {
 
   return (
     <div
-      className={`app-shell ${panelsVisible ? "" : "panels-hidden"}`}
+      className={`app-shell app-shell--${mode} ${panelsVisible ? "" : "panels-hidden"}`}
       onDragOver={(event) => {
         event.preventDefault();
         event.dataTransfer.dropEffect = catalogActionsDisabled || pendingDeletion ? "none" : "copy";
@@ -2804,13 +2833,12 @@ export default function App() {
             onCreateCollection={handleCreateCollection}
             onApplyPreset={applyPreset}
             onPreviewPreset={setPreviewPreset}
-            activePresetId={activePresetId}
+            activePresetId={displayedPresetId}
             presetAmount={presetAmount}
             onPresetAmountChange={changePresetAmount}
             onPresetAmountCommit={commitEdit}
             onCreateSnapshot={createSnapshot}
             onRestoreSnapshot={restoreSnapshot}
-            onReset={resetEdits}
             onCopySettings={copyDevelopSettings}
             onPasteSettings={pasteDevelopSettings}
             canPasteSettings={Boolean(copiedEditState)}
@@ -3051,8 +3079,6 @@ export default function App() {
             onToggleClipping={() => setShowClipping((visible) => !visible)}
             onProfileChange={updateProfile}
             onAutoAdjust={autoAdjust}
-            onApplyPreset={applyPreset}
-            onPreviewPreset={setPreviewPreset}
             onCreateSnapshot={createSnapshot}
             onRestoreSnapshot={restoreSnapshot}
             onResetEdits={resetEdits}
@@ -3152,6 +3178,7 @@ export default function App() {
 
       {photos.length ? (
         <Filmstrip
+          mode={mode}
           photos={filteredPhotos}
           activeId={activeId}
           selectedIds={selectedIds}

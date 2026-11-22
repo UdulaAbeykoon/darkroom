@@ -398,6 +398,8 @@ export interface DevelopPreset {
   name: string;
   group: string;
   description: string;
+  /** A discrete rendering profile; profile-only presets have no Amount control. */
+  profile?: string;
   adjustments: Partial<GlobalAdjustments>;
   hsl?: Partial<HslAdjustments>;
   curve?: ToneCurvePoint[];
