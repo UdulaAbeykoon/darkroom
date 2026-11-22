@@ -64,6 +64,51 @@ async function expectSaved(name, expected) {
   assert.deepEqual(actual, expected, `Saved adjustments for ${name}`);
 }
 
+async function setFilmstripSize(size) {
+  await page.locator('.filmstrip [aria-current="true"]').click({ button: "right" });
+  await page.getByRole("menuitem", { name: "View Options", exact: true }).hover();
+  // Keyboard activation also reaches the last submenu entry near the viewport edge.
+  await page.getByRole("menuitemradio", { name: `${size[0].toUpperCase()}${size.slice(1)} Thumbnails`, exact: true }).press("Enter");
+  await page.locator(`.filmstrip--${size}`).waitFor();
+}
+
+async function checkThumbnail(name, expectedRatio) {
+  const frame = page.locator(`.filmstrip [aria-label="${name}"]`);
+  await frame.click();
+  await page.waitForFunction(({ name, expectedRatio }) => {
+    const image = document.querySelector(`.filmstrip [aria-label="${name}"] img`);
+    return image?.complete && image.naturalHeight > 0 &&
+      Math.abs(image.naturalWidth / image.naturalHeight - expectedRatio) < 0.02;
+  }, { name, expectedRatio });
+  const fit = await frame.evaluate((button) => {
+    const image = button.querySelector("img");
+    const frame = button.getBoundingClientRect();
+    const rail = button.closest(".filmstrip__rail").getBoundingClientRect();
+    const bounds = image.getBoundingClientRect();
+    const style = getComputedStyle(image);
+    const scale = Math.min(bounds.width / image.naturalWidth, bounds.height / image.naturalHeight);
+    return {
+      naturalWidth: image.naturalWidth, naturalHeight: image.naturalHeight,
+      objectFit: style.objectFit, objectPosition: style.objectPosition,
+      frameWidth: frame.width, frameHeight: frame.height,
+      renderedWidth: image.naturalWidth * scale, renderedHeight: image.naturalHeight * scale,
+      imageWidth: bounds.width, imageHeight: bounds.height,
+      centerX: (bounds.left + bounds.right - frame.left - frame.right) / 2,
+      centerY: (bounds.top + bounds.bottom - frame.top - frame.bottom) / 2,
+      contained: bounds.left >= frame.left && bounds.right <= frame.right && bounds.top >= frame.top && bounds.bottom <= frame.bottom,
+      visible: frame.left >= rail.left - 1 && frame.right <= rail.right + 1,
+    };
+  });
+  assert.equal(fit.objectFit, "contain", `${name}: show the whole photograph`);
+  assert.equal(fit.objectPosition, "50% 50%", `${name}: center the photograph`);
+  assert.equal(fit.contained, true, `${name}: image box stays inside its frame`);
+  assert.equal(fit.visible, true, `${name}: active frame stays visible`);
+  assert.ok(Math.abs(fit.centerX) < 1 && Math.abs(fit.centerY) < 1, `${name}: centered image box`);
+  assert.ok(fit.renderedWidth <= fit.imageWidth + 1 && fit.renderedHeight <= fit.imageHeight + 1);
+  assert.ok(Math.abs(fit.renderedWidth / fit.renderedHeight - expectedRatio) < 0.02);
+  return fit;
+}
+
 try {
   await page.goto(url, { waitUntil: "networkidle" });
   await page.locator(".blocking-status").waitFor({ state: "hidden" });
@@ -71,9 +116,11 @@ try {
   if (await dismissReminder.isVisible()) await dismissReminder.click();
   const fixtures = await page.evaluate(() => Array.from({ length: 40 }, (_, index) => {
     const canvas = document.createElement("canvas");
-    canvas.width = 640;
-    canvas.height = 400;
+    const dimensions = [[640, 400], [400, 640], [480, 480]][index % 3];
+    canvas.width = dimensions[0];
+    canvas.height = dimensions[1];
     const ctx = canvas.getContext("2d");
+    ctx.scale(canvas.width / 640, canvas.height / 400);
     const sky = ctx.createLinearGradient(0, 0, 0, 400);
     sky.addColorStop(0, `hsl(${205 + index}, 32%, 40%)`);
     sky.addColorStop(0.65, `hsl(${25 + index}, 54%, 74%)`);
@@ -104,9 +151,34 @@ try {
   await page.getByRole("dialog", { name: "Import Photos" }).getByRole("button", { name: "Import", exact: true }).click();
   await page.waitForFunction(() => document.querySelectorAll(".photo-card").length === 40, null, { timeout: 60_000 });
   assert.equal(await page.locator(".filmstrip__frame").count(), 40);
-  checks.push("Imported 40 distinct generated photographs through the import dialog");
+  checks.push("Imported 40 distinct landscape, portrait and square photographs through the import dialog");
 
   await page.getByLabel("Sort photos").selectOption("name-asc");
+  for (const mode of ["Library", "Develop"]) {
+    await page.getByRole("button", { name: mode, exact: true }).click();
+    for (const size of ["small", "large", "medium"]) {
+      await setFilmstripSize(size);
+      const landscape = await checkThumbnail("photo-001.png", 640 / 400);
+      const portrait = await checkThumbnail("photo-002.png", 400 / 640);
+      const square = await checkThumbnail("photo-003.png", 1);
+      assert.equal(portrait.frameWidth, landscape.frameWidth, `${mode} ${size}: consistent cell widths`);
+      assert.equal(square.frameHeight, landscape.frameHeight, `${mode} ${size}: consistent cell heights`);
+      assert.ok(portrait.renderedHeight > portrait.renderedWidth);
+      assert.ok(landscape.renderedWidth > landscape.renderedHeight);
+    }
+  }
+  checks.push("Portrait, landscape and square images fit uncropped and centered in equal-size frames in both modules at every thumbnail size");
+
+  await checkThumbnail("photo-001.png", 640 / 400);
+  await page.locator('.filmstrip [aria-label="photo-001.png"]').click({ button: "right" });
+  await page.getByRole("menuitem", { name: "Rotate Right (CW)", exact: true }).click();
+  await checkThumbnail("photo-001.png", 400 / 640);
+  await checkActive("photo-001.png");
+  await page.getByRole("button", { name: "Undo", exact: true }).click();
+  await checkThumbnail("photo-001.png", 640 / 400);
+  checks.push("A rotated landscape preview becomes portrait in the filmstrip and Undo restores its original proportions");
+
+  await page.getByRole("button", { name: "Library", exact: true }).click();
   await page.locator(".photo-card").filter({ has: page.getByAltText("photo-033.png", { exact: true }) }).dblclick();
   await checkActive("photo-033.png");
   assert.ok(await page.locator(".filmstrip__rail").evaluate((rail) => rail.scrollLeft > 0));
