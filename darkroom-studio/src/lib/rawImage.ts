@@ -5,8 +5,6 @@ import type {
 } from "libraw-wasm";
 import type { PhotoMetadata, PhotoRecord } from "../types";
 
-const MEBIBYTE = 1024 * 1024;
-const HALF_SIZE_THRESHOLD_BYTES = 48 * MEBIBYTE;
 const MAX_DECODED_PIXELS = 50_000_000;
 const FULL_SIZE_PREVIEW_RATIO = 0.8;
 const NIKON_HIGH_EFFICIENCY_COMPRESSION = new Set([13, 14]);
@@ -66,7 +64,14 @@ export interface DecodedCameraRaw {
   width: number;
   height: number;
   metadata: PhotoMetadata;
+  /** PNGs are lossless 8-bit working images, not the original sensor samples. */
+  renderKind: "full-resolution" | "camera-jpeg";
 }
+
+type RenderablePhoto = Pick<
+  PhotoRecord,
+  "name" | "type" | "blob" | "renderBlob" | "width" | "height" | "metadata"
+> & { renderKind?: "full-resolution" | "camera-jpeg" | "embedded-preview" };
 
 interface EmbeddedRawPreview {
   blob: Blob;
@@ -274,7 +279,7 @@ export function rawPixelsToRgba(
   return output;
 }
 
-function canvasToJpeg(
+function canvasToPng(
   width: number,
   height: number,
   pixels: Uint8ClampedArray<ArrayBuffer>,
@@ -285,7 +290,7 @@ function canvasToJpeg(
     if (!context) throw new Error("The browser could not create a RAW canvas.");
     const image = new ImageData(pixels, width, height);
     context.putImageData(image, 0, 0);
-    return canvas.convertToBlob({ type: "image/jpeg", quality: 0.96 });
+    return canvas.convertToBlob({ type: "image/png" });
   }
 
   if (typeof document === "undefined") {
@@ -304,8 +309,7 @@ function canvasToJpeg(
         blob
           ? resolve(blob)
           : reject(new Error("The browser could not encode the decoded RAW image.")),
-      "image/jpeg",
-      0.96,
+      "image/png",
     );
   });
 }
@@ -325,14 +329,16 @@ function rawDecodeError(error: unknown): Error {
  * Demosaics one camera RAW locally. The decoder and its 1.4 MB WASM runtime are
  * loaded only after a RAW file is selected, and the worker is always released.
  */
-export async function decodeCameraRaw(file: Blob): Promise<DecodedCameraRaw> {
+async function decodeRaw(file: Blob): Promise<DecodedCameraRaw> {
   let decoder: InstanceType<(typeof import("libraw-wasm"))["default"]> | undefined;
   try {
     const { default: LibRaw } = await import("libraw-wasm");
     decoder = new LibRaw();
     const bytes = new Uint8Array(await file.arrayBuffer());
     await decoder.open(bytes, {
-      halfSize: file.size > HALF_SIZE_THRESHOLD_BYTES,
+      // File size is unrelated to requested output quality. Never reduce RAW
+      // dimensions implicitly; reject unsupported sizes instead.
+      halfSize: false,
       useCameraWb: true,
       useCameraMatrix: 3,
       outputColor: 1,
@@ -356,27 +362,112 @@ export async function decodeCameraRaw(file: Blob): Promise<DecodedCameraRaw> {
         return {
           ...preview,
           metadata: metadataFromRaw(metadata),
+          renderKind: "camera-jpeg",
         };
       }
+      throw new Error(
+        "This Nikon high-efficiency RAW is unsupported and has no usable full-size camera JPEG. The original has not been changed.",
+      );
+    }
+
+    // Check before demosaicing where possible, then validate the actual output
+    // in rawPixelsToRgba. Metadata can include sensor borders, so this is only
+    // a safety ceiling; we never infer an output scale from it.
+    if (metadata && metadata.width * metadata.height > MAX_DECODED_PIXELS) {
+      throw new Error(
+        `This RAW exceeds the ${MAX_DECODED_PIXELS / 1_000_000}-megapixel browser decoding limit. Export the unchanged original to preserve all sensor data.`,
+      );
     }
 
     const image = await decoder.imageData();
     if (!image) throw new Error("The RAW decoder returned no image pixels.");
     const pixels = rawPixelsToRgba(image);
     // The WASM runtime starts with a large shared heap. Release it before the
-    // browser allocates its canvas backing store and JPEG encoder buffers.
+    // browser allocates its canvas backing store and PNG encoder buffers.
     decoder.dispose();
     decoder = undefined;
-    const blob = await canvasToJpeg(image.width, image.height, pixels);
+    const blob = await canvasToPng(image.width, image.height, pixels);
+    if (blob.type !== "image/png") {
+      throw new Error("The browser could not create a lossless PNG working image.");
+    }
     return {
       blob,
       width: image.width,
       height: image.height,
       metadata: metadataFromRaw(metadata),
+      renderKind: "full-resolution",
     };
   } catch (error) {
     throw rawDecodeError(error);
   } finally {
     decoder?.dispose();
   }
+}
+
+// Each LibRaw worker owns a large WASM heap. Serialize full-resolution jobs so
+// multi-file import/export cannot allocate several heaps and image canvases.
+let decodeTail: Promise<unknown> = Promise.resolve();
+export function decodeCameraRaw(file: Blob): Promise<DecodedCameraRaw> {
+  const task = decodeTail.then(() => decodeRaw(file));
+  decodeTail = task.catch(() => undefined);
+  return task;
+}
+
+let cachedSource: Blob | undefined;
+let cachedDecoded: DecodedCameraRaw | undefined;
+const pendingDecodes = new WeakMap<Blob, Promise<DecodedCameraRaw>>();
+
+/**
+ * Resolve a verified full-resolution source for Develop and edited export.
+ * Legacy JPEG/half-size working images are rebuilt from the preserved RAW.
+ * At most one completed decode is cached, with concurrent requests coalesced.
+ */
+export async function fullRenderForPhoto(
+  photo: RenderablePhoto,
+  allowCameraJpeg = false,
+): Promise<DecodedCameraRaw> {
+  if (!isCameraRawFile(photo)) {
+    return {
+      blob: renderBlobForPhoto(photo),
+      width: photo.width,
+      height: photo.height,
+      metadata: photo.metadata,
+      renderKind: "full-resolution",
+    };
+  }
+  if (photo.renderKind === "full-resolution" && photo.renderBlob?.type === "image/png") {
+    return {
+      blob: photo.renderBlob,
+      width: photo.width,
+      height: photo.height,
+      metadata: photo.metadata,
+      renderKind: "full-resolution",
+    };
+  }
+
+  let decoded = cachedSource === photo.blob ? cachedDecoded : undefined;
+  if (!decoded) {
+    let pending = pendingDecodes.get(photo.blob);
+    if (!pending) {
+      pending = decodeCameraRaw(photo.blob);
+      pendingDecodes.set(photo.blob, pending);
+      void pending.finally(() => pendingDecodes.delete(photo.blob)).catch(() => {});
+    }
+    decoded = await pending;
+    cachedSource = photo.blob;
+    cachedDecoded = decoded;
+  }
+  if (decoded.renderKind === "camera-jpeg" && !allowCameraJpeg) {
+    throw new Error(
+      "This Nikon high-efficiency RAW cannot be fully decoded by the current decoder. Export the unchanged original to preserve all sensor data. Its camera JPEG is available for preview only, not full-quality edited export.",
+    );
+  }
+  return decoded;
+}
+
+export async function fullRenderBlobForPhoto(
+  photo: RenderablePhoto,
+  allowCameraJpeg = false,
+): Promise<Blob> {
+  return (await fullRenderForPhoto(photo, allowCameraJpeg)).blob;
 }

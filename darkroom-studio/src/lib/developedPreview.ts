@@ -6,6 +6,8 @@ const MAX_CONCURRENT_RENDERS = 2;
 const MAX_CACHE_ENTRIES = 48;
 const RELEASE_DELAY_MS = 30_000;
 const SUPERSEDED_RELEASE_DELAY_MS = 1_000;
+const sourceRevisions = new WeakMap<Blob, number>();
+let nextSourceRevision = 0;
 
 type PreviewStatus = "queued" | "rendering" | "ready" | "failed";
 
@@ -430,10 +432,13 @@ export function acquireDevelopedPreview(
   requestedMaxDimension: number,
 ): DevelopedPreviewLease {
   const maxDimension = previewDimensionBucket(requestedMaxDimension);
+  const source = renderBlobForPhoto(photo);
+  if (!sourceRevisions.has(source)) sourceRevisions.set(source, ++nextSourceRevision);
   const key = [
     photo.id,
     photo.size,
     photo.type,
+    sourceRevisions.get(source),
     editRevision(photo.edits),
     maxDimension,
   ].join(":");

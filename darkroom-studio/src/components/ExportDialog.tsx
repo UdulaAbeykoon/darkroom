@@ -44,6 +44,8 @@ export default function ExportDialog({
   onClose,
   onExport,
 }: ExportDialogProps) {
+  const original = settings.format === "original";
+  const lossless = original || settings.format === "image/png";
   const extension =
     settings.format === "image/png"
       ? "png"
@@ -65,7 +67,8 @@ export default function ExportDialog({
   const fullSizeActive =
     settings.format === "image/jpeg" &&
     settings.resizeMode === "original" &&
-    qualityPercent === 90;
+    qualityPercent === 100;
+  const losslessPresetActive = settings.format === "image/png" && settings.resizeMode === "original";
   const webPresetActive =
     settings.format === "image/jpeg" &&
     settings.resizeMode === "long-edge" &&
@@ -77,7 +80,7 @@ export default function ExportDialog({
     settings.longEdge === 1024 &&
     qualityPercent === 60;
   const photoBaseName = photo.name.replace(/\.[^/.]+$/, "");
-  const exampleName = selectionCount > 1
+  const exampleName = original ? photo.name : selectionCount > 1
     ? `${settings.fileName || "Darkroom_export"}_001_${photoBaseName}.${extension}`
     : `${settings.fileName || `${photoBaseName}_edit`}.${extension}`;
 
@@ -85,7 +88,7 @@ export default function ExportDialog({
     onChange({
       ...settings,
       format: "image/jpeg",
-      quality: 0.9,
+      quality: 1,
       resizeMode: "original",
     });
   };
@@ -162,12 +165,24 @@ export default function ExportDialog({
           <div className="lrc-export-presets__list">
             <button
               type="button"
+              className={`lrc-export-preset ${losslessPresetActive ? "is-active" : ""}`}
+              aria-pressed={losslessPresetActive}
+              onClick={() => onChange({ ...settings, format: "image/png", quality: 1, resizeMode: "original" })}
+            >Full-size PNG</button>
+            <button
+              type="button"
               className={`lrc-export-preset ${fullSizeActive ? "is-active" : ""}`}
               aria-pressed={fullSizeActive}
               onClick={applyFullSizePreset}
             >
               Full-size JPEG
             </button>
+            <button
+              type="button"
+              className={`lrc-export-preset ${original ? "is-active" : ""}`}
+              aria-pressed={original}
+              onClick={() => onChange({ ...settings, format: "original" })}
+            >Original file</button>
             <button
               type="button"
               className={`lrc-export-preset ${emailActive ? "is-active" : ""}`}
@@ -202,6 +217,7 @@ export default function ExportDialog({
                   <input
                     type="text"
                     value={settings.fileName}
+                    disabled={original}
                     placeholder={selectionCount > 1 ? "Darkroom_export" : "Untitled"}
                     onChange={(event) =>
                       onChange({ ...settings, fileName: event.target.value })
@@ -225,6 +241,7 @@ export default function ExportDialog({
                       })
                     }
                   >
+                    <option value="original">Original file</option>
                     <option value="image/jpeg">JPEG</option>
                     <option value="image/png">PNG</option>
                     <option value="image/webp">WebP</option>
@@ -232,7 +249,7 @@ export default function ExportDialog({
                 </label>
                 <label
                   className={`lrc-export-control lrc-export-control--range ${
-                    settings.format === "image/png" ? "is-disabled" : ""
+                    lossless ? "is-disabled" : ""
                   }`}
                 >
                   <span>Quality:</span>
@@ -241,7 +258,7 @@ export default function ExportDialog({
                     min={10}
                     max={100}
                     value={qualityPercent}
-                    disabled={settings.format === "image/png"}
+                    disabled={lossless}
                     onChange={(event) =>
                       onChange({
                         ...settings,
@@ -250,16 +267,23 @@ export default function ExportDialog({
                     }
                   />
                   <output>
-                    {settings.format === "image/png" ? "—" : qualityPercent}
+                    {lossless ? "—" : qualityPercent}
                   </output>
                 </label>
                 <p className="lrc-export-note">
-                  Original metadata is not included in exported images.
+                  {original
+                    ? "Downloads the exact imported file, including its original name and metadata. Edits, resizing, and watermarks are not applied."
+                    : settings.format === "image/png"
+                      ? "PNG preserves the rendered pixels without lossy compression. Edited exports use 8-bit sRGB; original metadata is not included."
+                      : "JPEG and WebP use lossy compression, even at quality 100. Edited exports use 8-bit sRGB; original metadata is not included."}
                 </p>
+                {!original && photo.renderKind === "camera-jpeg" ? (
+                  <p className="lrc-export-note" role="status">This RAW compression only supports a camera preview. Choose Original file to preserve the full RAW quality.</p>
+                ) : null}
               </div>
             </ExportSection>
 
-            <ExportSection title="Image Sizing" defaultOpen>
+            {!original ? <><ExportSection title="Image Sizing" defaultOpen>
               <div className="lrc-export-form-grid">
                 <div className="lrc-export-resize-row">
                   <label className="lrc-export-check lrc-export-check--flush">
@@ -415,7 +439,7 @@ export default function ExportDialog({
                   <output>{watermarkOpacityPercent}</output>
                 </label>
               </div>
-            </ExportSection>
+            </ExportSection></> : null}
           </div>
         </main>
       </div>

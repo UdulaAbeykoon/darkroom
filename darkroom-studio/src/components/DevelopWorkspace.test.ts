@@ -3,9 +3,34 @@ import type { CropState } from "../types";
 import {
   cropFromDelta,
   cropOverlayLines,
+  developPreviewPixelRatio,
+  developPreviewSourceLimit,
   type CropAction,
   type CropOverlayCorners,
 } from "./DevelopWorkspace";
+
+describe("Develop preview resolution", () => {
+  it("only allows explicitly preview-only sources to fit the GPU texture limit", () => {
+    expect(developPreviewSourceLimit({ width: 8256, height: 5504, renderKind: "camera-jpeg" })).toBe(8256);
+    expect(developPreviewSourceLimit({ width: 8256, height: 5504, renderKind: "full-resolution" })).toBe(Infinity);
+    expect(developPreviewSourceLimit({ width: 6032, height: 4032 })).toBe(Infinity);
+  });
+
+  it("renders additional pixels when a Retina preview is magnified", () => {
+    expect(developPreviewPixelRatio(1, 2)).toBe(2);
+    expect(developPreviewPixelRatio(4, 2)).toBe(8);
+  });
+
+  it("retains display resolution at fit and smaller zooms", () => {
+    expect(developPreviewPixelRatio(0.25, 1.5)).toBe(1.5);
+    expect(developPreviewPixelRatio(1, 3)).toBe(3);
+  });
+
+  it("uses a finite display fallback when browser measurements are unavailable", () => {
+    expect(developPreviewPixelRatio(2, Number.NaN)).toBe(2);
+    expect(developPreviewPixelRatio(Number.POSITIVE_INFINITY, 2)).toBe(2);
+  });
+});
 
 const cropState = (patch: Partial<CropState> = {}): CropState => ({
   x: 0.2,

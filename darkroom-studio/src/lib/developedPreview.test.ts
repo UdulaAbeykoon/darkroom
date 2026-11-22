@@ -220,6 +220,23 @@ describe("deleteDevelopedPreviews", () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
+  it("rebuilds cached previews when a legacy RAW working image is replaced", async () => {
+    const { acquireDevelopedPreview, deleteDevelopedPreviews } = await import("./developedPreview");
+    const legacy = { ...photo("raw-upgrade"), renderBlob: new Blob(["lossy preview"], { type: "image/jpeg" }) };
+    const oldLease = acquireDevelopedPreview(legacy, 512);
+    const oldUrl = await oldLease.promise;
+    await settleRendering();
+    const upgraded = { ...legacy, renderBlob: new Blob(["full-resolution pixels"], { type: "image/png" }) };
+    const newLease = acquireDevelopedPreview(upgraded, 512);
+    const newUrl = await newLease.promise;
+    expect(newUrl).not.toBe(oldUrl);
+    expect(engines.some((engine) => engine.load.mock.calls.some(([blob]) => blob === upgraded.renderBlob))).toBe(true);
+    const reusedLease = acquireDevelopedPreview({ ...upgraded }, 512);
+    await expect(reusedLease.promise).resolves.toBe(newUrl);
+    deleteDevelopedPreviews([legacy.id]);
+    [oldLease, newLease, reusedLease].forEach((lease) => lease.release());
+  });
+
   it("cancels queued and decoding work and never returns a deleted renderer to the pool", async () => {
     deferLoads = true;
     const { acquireDevelopedPreview, deleteDevelopedPreviews } = await import("./developedPreview");

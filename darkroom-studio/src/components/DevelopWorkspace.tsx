@@ -160,6 +160,23 @@ const clamp = (value: number, min = 0, max = 1) =>
 
 const HISTOGRAM_SETTLE_MS = 100;
 
+/** Keep zoomed previews sharp without changing the CSS coordinates of overlays. */
+export function developPreviewPixelRatio(zoom: number, devicePixelRatio: number) {
+  const displayRatio = Number.isFinite(devicePixelRatio) && devicePixelRatio > 0
+    ? devicePixelRatio
+    : 1;
+  const magnification = Number.isFinite(zoom) ? Math.max(1, zoom) : 1;
+  return displayRatio * magnification;
+}
+
+export function developPreviewSourceLimit(photo: Pick<PhotoRecord, "renderKind" | "width" | "height">) {
+  // A camera JPEG is explicitly preview-only and may adapt to the GPU limit.
+  // Supported sources retain every pixel or fail clearly instead of shrinking.
+  return photo.renderKind === "camera-jpeg"
+    ? Math.max(photo.width, photo.height)
+    : Number.POSITIVE_INFINITY;
+}
+
 type PreviewRenderSnapshot = {
   photoId: string;
   state: EditState;
@@ -499,6 +516,7 @@ export default function DevelopWorkspace(props: Props) {
   const cropUpdateFrameRef = useRef<number | null>(null);
   const pendingCropUpdateRef = useRef<CropState | null>(null);
   const renderRef = useRef<() => void>(() => {});
+  const resizePreviewRef = useRef<() => void>(() => {});
   const referencePreview = useDevelopedPreview(props.referencePhoto ?? photo, 1600, {
     eager: true,
     fallbackUrl: props.referencePhoto?.objectUrl ?? photo.objectUrl,
@@ -851,18 +869,26 @@ export default function DevelopWorkspace(props: Props) {
     propsRef.current.onEngineReady(engine);
 
     let resizeFrame: number | null = null;
-    let pendingSize: { width: number; height: number } | null = null;
+    let pendingSize: { width: number; height: number; pixelRatio: number } | null = null;
     let appliedWidth = -1;
     let appliedHeight = -1;
+    let appliedPixelRatio = -1;
     const applyResize = () => {
       resizeFrame = null;
       const size = pendingSize;
       pendingSize = null;
       if (!size) return;
-      if (size.width === appliedWidth && size.height === appliedHeight) return;
+      if (
+        size.width === appliedWidth &&
+        size.height === appliedHeight &&
+        size.pixelRatio === appliedPixelRatio
+      ) return;
       appliedWidth = size.width;
       appliedHeight = size.height;
-      engine.resize(size.width, size.height);
+      appliedPixelRatio = size.pixelRatio;
+      // ImageEngine bounds the backing store to GPU and memory limits. Its CSS
+      // size stays fixed, so crop, mask, repair, and pointer mapping do not move.
+      engine.resize(size.width, size.height, size.pixelRatio);
       renderRef.current();
     };
     const resize = () => {
@@ -870,15 +896,20 @@ export default function DevelopWorkspace(props: Props) {
       pendingSize = {
         width: Math.max(1, Math.round(rect.width * 100) / 100),
         height: Math.max(1, Math.round(rect.height * 100) / 100),
+        pixelRatio: developPreviewPixelRatio(propsRef.current.zoom, window.devicePixelRatio),
       };
       if (resizeFrame === null) resizeFrame = requestAnimationFrame(applyResize);
     };
     const observer = new ResizeObserver(resize);
     observer.observe(stage);
+    resizePreviewRef.current = resize;
+    window.addEventListener("resize", resize);
     resize();
 
     return () => {
       observer.disconnect();
+      window.removeEventListener("resize", resize);
+      resizePreviewRef.current = () => {};
       if (resizeFrame !== null) cancelAnimationFrame(resizeFrame);
       if (renderFrameRef.current !== null) {
         cancelAnimationFrame(renderFrameRef.current);
@@ -918,6 +949,10 @@ export default function DevelopWorkspace(props: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  useLayoutEffect(() => {
+    resizePreviewRef.current();
+  }, [zoom]);
+
   useEffect(() => {
     const engine = engineRef.current;
     if (!engine) return;
@@ -934,7 +969,7 @@ export default function DevelopWorkspace(props: Props) {
     }
     const renderBlob = renderBlobForPhoto(photo);
     void engine
-      .load(renderBlob)
+      .load(renderBlob, developPreviewSourceLimit(photo))
       .then(() => {
         if (token !== loadTokenRef.current) return;
         loadedRef.current = true;
@@ -972,7 +1007,7 @@ export default function DevelopWorkspace(props: Props) {
         loadReadyFrameRef.current = null;
       }
     };
-  }, [photo.id, photo.blob, photo.renderBlob, scheduleRender]);
+  }, [photo.id, photo.blob, photo.renderBlob, photo.renderKind, photo.width, photo.height, scheduleRender]);
 
   useLayoutEffect(() => {
     previewRevisionRef.current += 1;
@@ -2506,7 +2541,14 @@ export default function DevelopWorkspace(props: Props) {
       </div>
       <div className="canvas-toolbar">
         <div className="canvas-toolbar__group">
-          <strong title={photo.name}>{photo.name}</strong>
+          <strong
+            role={photo.renderKind === "camera-jpeg" ? "status" : undefined}
+            title={photo.renderKind === "camera-jpeg"
+              ? `${photo.name}: this Nikon high-efficiency RAW is shown using its camera JPEG. Full-quality edited export is unavailable; export Original to preserve the RAW.`
+              : photo.name}
+          >
+            {photo.renderKind === "camera-jpeg" ? "Camera JPEG preview" : photo.name}
+          </strong>
           <span className="canvas-toolbar__readout">
             {photo.width} × {photo.height}
           </span>

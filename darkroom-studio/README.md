@@ -71,7 +71,7 @@ installation is intended for a dedicated HTTPS deployment origin or subpath.
   named versions, undo/redo history, and keyboard shortcuts
 - Cached developed previews throughout Photo Grid, Square Grid, Detail, Filmstrip, and the
   export dialog—edits, crop, masks, and repairs remain visually consistent
-- Single or selected-photo batch JPEG, PNG, and WebP export with progress,
+- Single or selected-photo batch original-file, JPEG, PNG, and WebP export with progress,
   resize, quality, crop, masks, repairs, and text watermark
 - Responsive desktop/compact layouts, keyboard focus, and reduced-motion support
 
@@ -91,15 +91,27 @@ backups.
 
 This version decodes JPEG, PNG, WebP, GIF, and BMP, plus TIFF/HEIC when the
 browser supports them. Camera RAW files are demosaiced locally in a background
-LibRaw worker to an 8-bit sRGB working image; the original RAW bytes are kept
-unchanged. Files over 48 MB use LibRaw's half-size mode to keep peak browser
-memory bounded. RAW support therefore does not claim a native 16-bit linear
-pipeline. Older catalogs containing semantic/depth estimates retain their saved
+LibRaw worker to a full-resolution, losslessly encoded PNG working image;
+the original RAW bytes are kept unchanged. File size never automatically
+selects half-resolution decoding. Existing RAW catalogs with JPEG working
+images are rebuilt from their originals for Develop and edited export.
+The working pixels are still 8-bit sRGB: lossless PNG encoding does not preserve
+all sensor precision or offer a native high-bit-depth RAW editing pipeline.
+Nikon high-efficiency compression that the decoder cannot process is explicitly
+preview-only; edited export is blocked and Original export remains available.
+Older catalogs containing semantic/depth estimates retain their saved
 rendering for compatibility, but these tools can no longer be created. There is
 no connected AI service. Heal is a luminance-matched clone
 approximation. Browser encoders do not preserve EXIF reliably, and very large
-exports are bounded by the GPU's texture/viewport limit. Imports are capped at
-256 MB per file to avoid exhausting a browser tab.
+exports are bounded by the GPU's texture/viewport limit and a 64-megapixel output
+budget. Unsupported requested dimensions fail rather than silently shrinking.
+Imports are capped at 256 MB per file, with a 50-megapixel RAW decoding limit.
+
+Export defaults to full-size PNG, which adds no lossy encoding to the rendered
+8-bit pixels. The full-size JPEG preset uses quality 100, which is still lossy.
+Original file export downloads the exact imported bytes and embedded metadata;
+it does not apply editing, resizing, or watermarks. Rendered exports omit source
+metadata and do not offer 16-bit TIFF or selectable wide-gamut ICC profiles.
 
 Those constraints are called out in the interface; originals remain untouched
 when a file cannot be decoded or exported.
@@ -138,6 +150,10 @@ PLAYWRIGHT_MODULE=/absolute/path/to/playwright/index.mjs \
 
 Playwright is optional test tooling. Set `E2E_SCREENSHOT` to choose where the
 final browser screenshot is saved.
+
+The [RAW quality audit](docs/RAW_QUALITY.md) documents the Lightroom comparison,
+public Nikon fixtures, exact-original checks, and the real-photo import/edit/export
+browser test in `scripts/check-photo-quality.mjs`.
 
 ## Manual masking workflow
 
